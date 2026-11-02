@@ -38,6 +38,8 @@ jobs:
           perl -0pi -e 's/SolidCraft/ScoutCAD/g; s/<html lang="en">/<html lang="fr">/g' apps/solidcraft-web/index.html apps/solidcraft-web/src/main.rs
           perl -0pi -e 's/let mut app = SolveApp::new\(Session::default\(\), services\)\.with_control\(receiver\);/let mut app = SolveApp::new(Session::default(), services).with_control(receiver);\n                        app.preferences.language = "fr".into();/g' apps/solidcraft-web/src/main.rs
           grep -q 'app.preferences.language = "fr"' apps/solidcraft-web/src/main.rs
+          grep -q scouthub-client apps/solidcraft-web/index.html || sed -i 's#</body>#  <script src="/ScoutHub/scouthub-client.js" data-app="ScoutCAD" data-open="event"></script>
+</body>#' apps/solidcraft-web/index.html
           git add -A
           git diff --cached --quiet && exit 0
           git commit -m "Sync SolidCraft upstream updates"
