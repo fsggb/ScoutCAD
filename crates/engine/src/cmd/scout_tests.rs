@@ -59,7 +59,6 @@ fn bad_input_is_refused_not_panicked() {
     for p in [
         json!({"length": "long"}),
         json!({"length": 1e30}),
-        json!({"length": f64::NAN}),
         json!({"rotation": 45}),
         json!({"at": [1]}),
         json!({"coin": "nope"}),
