@@ -1061,7 +1061,7 @@ preference_settings! {
     /// reloaded when it changes (#7573). Empty (the default): no file is followed.
     theme_follow: String = String::new(), PAGE_INTERFACE;
     /// Interface language (a registered locale ID).
-    language: String = "en".into(), 0;
+    language: String = "fr".into(), 0;
     /// Shared workspace composition; system windows and popups retain their purpose.
     layout: crate::shell::LayoutMode = Default::default(), PAGE_INTERFACE;
     /// Ordered view controls and their appearance.

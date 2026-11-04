@@ -28,6 +28,7 @@ pub mod render_jobs;
 pub mod render_lights;
 pub mod sample;
 pub mod schema;
+pub mod scout;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod slicer_files;
 mod slicer_icon;

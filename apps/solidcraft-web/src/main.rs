@@ -1,4 +1,4 @@
-//! ScoutCAD in the browser.
+//! SoLeadWorks in the browser.
 //!
 //! Runs the same [`solidcraft_ui_egui::SolveApp`] as the desktop app through eframe's web runner
 //! (wgpu: WebGPU where available, WebGL2 otherwise). Build with `trunk build --release` from this

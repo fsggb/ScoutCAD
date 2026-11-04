@@ -383,6 +383,8 @@ crate::dialog_descriptor::dialog_descriptors! {
             Motion(crate::dialogs_motion::Mo),
             /// Insert Part from the standard parts library (`dialogs_parts`).
             Part(crate::dialogs_parts::Pt),
+            /// Nouveau meuble (SoLeadWorks, `dialogs_scout`).
+            Meuble(crate::dialogs_scout::Mb),
             PartSize(crate::dialogs_part_size::Resize),
             /// Edit Text: a sketch text's content and placement (`sketch_text`).
             Text(Box<crate::sketch_text::Tx>),
@@ -1052,6 +1054,7 @@ impl Dialog {
                     .or_else(|| crate::dialogs_frame::start(app, id))
                     .or_else(|| crate::dialogs_appearance::start(app, id))
                     .or_else(|| crate::dialogs_motion::start(app, id))
+                    .or_else(|| crate::dialogs_scout::start(app, id))
                     .or_else(|| crate::dialogs_parts::start(app, id))
                     .or_else(|| crate::dialogs_part_size::start(app, id))
                     .or_else(|| crate::sketch_text::start(app, id))
@@ -2260,6 +2263,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Appearance(_) => "APPEARANCE",
         Kind::Motion(k) => k.title(),
         Kind::Part(_) => "INSERT PART",
+        Kind::Meuble(_) => crate::dialogs_scout::title(),
         Kind::PartSize(_) => "Change Part Size",
         Kind::Text(_) => "EDIT TEXT",
         Kind::TextMove(_) => "MOVE/COPY TEXT",
@@ -4940,6 +4944,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::Appearance(k) => return Ok(crate::dialogs_appearance::commands(k, &d.inputs)),
         Kind::Motion(k) => return crate::dialogs_motion::commands(app, k, &d.inputs),
         Kind::Part(k) => return crate::dialogs_parts::commands(app, k, &d.inputs),
+        Kind::Meuble(k) => return crate::dialogs_scout::commands(k),
         Kind::PartSize(k) => return crate::dialogs_part_size::commands(app, k),
         Kind::Text(k) => return crate::sketch_text::commands(app, k),
         Kind::TextMove(k) => return crate::sketch_text_move::commands(app, k),

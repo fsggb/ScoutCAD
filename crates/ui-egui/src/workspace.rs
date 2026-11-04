@@ -32,7 +32,7 @@ pub fn tab_name(tab: &str) -> String {
     crate::i18n::tr_label(&cased).to_string()
 }
 
-pub const TABS: &[&str] = &["MODEL", "SURFACE", "ASSEMBLE", "INSERT", "INSPECT", "MANAGE", "VIEW"];
+pub const TABS: &[&str] = &["SCOUT", "MODEL", "ASSEMBLE", "INSERT", "INSPECT", "MANAGE", "VIEW"];
 
 /// Reading order of the compact, three-column constraint gallery. Icons come from each spec.
 pub const CONSTRAINT_GALLERY: &[&str] = &[
@@ -98,7 +98,7 @@ pub struct Section {
 /// Parameters and Configurations stay on every design tab they were on before the ribbon
 /// redesign (MODEL and SHEET METAL), on SKETCH while editing a sketch, on WELDMENTS, and in
 /// MANAGE, their canonical home.
-const CONFIGURE: &[&str] = &["parameters.change", "config.table", "config.configure"];
+const CONFIGURE: &[&str] = &["parameters.change"];
 
 /// Commands that stay for agents, MCP and scripts but are not offered to people: the sketch solves
 /// itself after every edit, so a Solve button (and the search hit for it) only confuses; drawn 3D
@@ -106,34 +106,31 @@ const CONFIGURE: &[&str] = &["parameters.change", "config.table", "config.config
 pub const AGENT_ONLY: &[&str] = &["sketch.solve", "sketch.move3d"];
 
 pub const SECTIONS: &[Section] = &[
+    // Scout furniture and patrol corners: the tab SoLeadWorks opens on.
     Section {
-        tab: "MODEL",
-        panel: "SKETCH",
-        promoted: 1,
-        ids: &["sketch.create", "sketch.edit", "sketch.line3d", "sketch.arc3d", "sketch.spline3d", "sketch.point3d"],
+        tab: "SCOUT",
+        panel: "MEUBLE",
+        promoted: 5,
+        ids: &["scout.meuble.banc", "scout.meuble.banc_dossier", "scout.meuble.table", "scout.meuble.table_prepa", "scout.meuble.etagere", "scout.meuble.create"],
     },
+    Section { tab: "SCOUT", panel: "COIN", promoted: 1, ids: &["scout.coin.create"] },
+    Section { tab: "SCOUT", panel: "PLANS", promoted: 3, ids: &["scout.plan.meuble", "scout.plan.coin", "assembly.bom"] },
+    // Poles of any length along a sketch's lines (a frame member is a round or square bar).
+    Section { tab: "SCOUT", panel: "PIÈCES", promoted: 1, ids: &["frame.member"] },
+    Section { tab: "SCOUT", panel: "MONTAGE", promoted: 2, ids: &["explode.create", "timeline.play"] },
+    Section { tab: "MODEL", panel: "SKETCH", promoted: 1, ids: &["sketch.create", "sketch.edit"] },
     Section { tab: "MODEL", panel: "CREATE", promoted: 3, ids: &["solid.extrude", "solid.revolve", "solid.hole"] },
-    Section {
-        tab: "MODEL",
-        panel: "MODIFY",
-        promoted: 4,
-        ids: &["solid.fillet", "solid.chamfer", "solid.shell", "solid.press_pull", "sheet.convert"],
-    },
+    Section { tab: "MODEL", panel: "MODIFY", promoted: 4, ids: &["solid.fillet", "solid.chamfer", "solid.press_pull", "solid.combine"] },
     Section {
         tab: "MODEL",
         panel: "ARRANGE",
         promoted: 3,
         ids: &["solid.move", "solid.mirror", "solid.pattern.rectangular", "solid.align", "solid.pattern.circular", "solid.pattern.path"],
     },
-    Section { tab: "MODEL", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
+    Section { tab: "MODEL", panel: "CONFIGURE", promoted: 1, ids: CONFIGURE },
     Section { tab: "MODEL", panel: "CONSTRUCT", promoted: 1, ids: &["construct.plane.offset"] },
     // Only while a linked design is edited in place, pinned at the right as FINISH SKETCH is.
     Section { tab: "MODEL", panel: "FINISH EDITING", promoted: 1, ids: &["component.finish_edit"] },
-    // Sketches drive surfaces too: New Sketch leads the tab, as on MODEL and SHEET METAL.
-    Section { tab: "SURFACE", panel: "SKETCH", promoted: 1, ids: &["sketch.create"] },
-    Section { tab: "SURFACE", panel: "CREATE", promoted: 4, ids: &["surface.extrude", "surface.revolve", "surface.sweep", "surface.loft"] },
-    Section { tab: "SURFACE", panel: "EDIT", promoted: 4, ids: &["surface.trim", "surface.untrim", "surface.extend", "surface.stitch"] },
-    Section { tab: "SURFACE", panel: "CONVERT", promoted: 2, ids: &["surface.thicken", "mesh.convert"] },
     Section {
         tab: "ASSEMBLE",
         panel: "COMPONENTS",
@@ -144,18 +141,7 @@ pub const SECTIONS: &[Section] = &[
         tab: "ASSEMBLE",
         panel: "JOINTS",
         promoted: 4,
-        ids: &[
-            "joint.create",
-            "joint.as_built",
-            "joint.origin",
-            "joint.rigid_group",
-            "joint.limits",
-            "joint.gear",
-            "joint.rack_pinion",
-            "joint.screw",
-            "joint.cam",
-            "joint.reach",
-        ],
+        ids: &["joint.create", "joint.as_built", "joint.origin", "joint.rigid_group", "joint.limits"],
     },
     Section {
         tab: "ASSEMBLE",
@@ -163,65 +149,17 @@ pub const SECTIONS: &[Section] = &[
         promoted: 4,
         ids: &["occurrence.move", "occurrence.ground", "component.capture_position", "component.revert_position"],
     },
-    Section {
-        tab: "ASSEMBLE",
-        panel: "MOTION",
-        promoted: 4,
-        ids: &["joint.drive", "joint.motion_link", "motion.study", "motion.trace", "explode.create"],
-    },
-    Section {
-        tab: "ASSEMBLE",
-        panel: "CONTACT",
-        promoted: 2,
-        ids: &["contact.enable_sets", "contact.check", "contact.enable_all", "contact.disable_all", "contact.create", "contact.edit", "contact.list"],
-    },
-    Section {
-        tab: "INSERT",
-        panel: "FILES",
-        promoted: 3,
-        ids: &["file.insert_step", "file.insert_mesh", "pointcloud.insert", "component.insert_design", "file.save_mesh", "file.send_to_slicer"],
-    },
-    Section { tab: "INSERT", panel: "IMAGES", promoted: 3, ids: &["canvas.insert", "canvas.decal", "canvas.edit"] },
-    Section { tab: "INSERT", panel: "2D", promoted: 2, ids: &["sketch.insert_dxf", "sketch.insert_svg"] },
+    Section { tab: "ASSEMBLE", panel: "EXPLODE", promoted: 1, ids: &["explode.create"] },
+    Section { tab: "INSERT", panel: "FILES", promoted: 2, ids: &["file.insert_step", "component.insert_design"] },
+    Section { tab: "INSERT", panel: "2D", promoted: 1, ids: &["sketch.insert_dxf"] },
     Section { tab: "INSERT", panel: "LIBRARY", promoted: 3, ids: &["parts.fastener", "parts.library", "parts.resize", "parts.insert"] },
     Section { tab: "INSERT", panel: "LINKS", promoted: 2, ids: &["component.update_links", "component.break_link"] },
     Section { tab: "INSPECT", panel: "MEASURE", promoted: 3, ids: &["inspect.measure", "inspect.center_of_mass", "component.properties"] },
     Section { tab: "INSPECT", panel: "SECTION", promoted: 1, ids: &["inspect.section"] },
-    Section {
-        tab: "INSPECT",
-        panel: "CHECK",
-        promoted: 4,
-        ids: &["inspect.interference", "inspect.draft", "inspect.accessibility", "contact.check", "inspect.compare"],
-    },
-    Section {
-        tab: "INSPECT",
-        panel: "SURFACE QUALITY",
-        promoted: 4,
-        ids: &[
-            "inspect.zebra",
-            "inspect.curvature_map",
-            "inspect.curvature_comb",
-            "inspect.isocurve",
-            "inspect.minimum_radius",
-            "inspect.environment_map",
-            "inspect.continuity",
-        ],
-    },
+    Section { tab: "INSPECT", panel: "CHECK", promoted: 2, ids: &["inspect.interference", "inspect.compare"] },
     Section { tab: "INSPECT", panel: "HISTORY", promoted: 3, ids: &["timeline.play", "timeline.dependents", "document.inspect"] },
-    Section {
-        tab: "MANAGE",
-        panel: "PARAMETERS",
-        promoted: 2,
-        ids: &["parameters.change", "parameters.graph", "parameters.move", "parameters.import", "parameters.export"],
-    },
-    Section { tab: "MANAGE", panel: "CONFIGURATIONS", promoted: 2, ids: &["config.table", "config.configure", "config.rules", "config.preview"] },
-    Section {
-        tab: "MANAGE",
-        panel: "MATERIALS",
-        promoted: 2,
-        ids: &["material.assign", "appearance.assign", "material.properties.validate", "library.inspect", "library.export", "library.apply"],
-    },
-    Section { tab: "MANAGE", panel: "RULES", promoted: 3, ids: &["sheet.manage_rules", "plastic.manage_rules", "plastic.assign_rule"] },
+    Section { tab: "MANAGE", panel: "PARAMETERS", promoted: 2, ids: &["parameters.change", "parameters.graph", "parameters.move", "parameters.import", "parameters.export"] },
+    Section { tab: "MANAGE", panel: "MATERIALS", promoted: 2, ids: &["material.assign", "appearance.assign", "library.inspect", "library.export", "library.apply"] },
     Section {
         tab: "MANAGE",
         panel: "DESIGN",
@@ -254,14 +192,7 @@ pub const SECTIONS: &[Section] = &[
         tab: "SKETCH",
         panel: "CREATE",
         promoted: 5,
-        ids: &[
-            "sketch.line",
-            "sketch.rectangle.two_point",
-            "sketch.circle.center",
-            "sketch.arc.three_point",
-            "sketch.construction_line",
-            "sketch.infinite",
-        ],
+        ids: &["sketch.line", "sketch.rectangle.two_point", "sketch.circle.center", "sketch.arc.three_point", "sketch.construction_line", "sketch.infinite"],
     },
     Section {
         tab: "SKETCH",
@@ -286,44 +217,11 @@ pub const SECTIONS: &[Section] = &[
             "sketch.constrainer",
         ],
     },
-    Section {
-        tab: "SKETCH",
-        panel: "REFERENCE",
-        promoted: 1,
-        ids: &[
-            "sketch.project",
-            "sketch.intersect",
-            "sketch.include_3d",
-            "sketch.project_to_surface",
-            "sketch.intersection_curve",
-            "sketch.spun_profile",
-            "sketch.isoparametric_curve",
-            "sketch.fit_curves_to_section",
-            "sketch.insert_dxf",
-            "sketch.insert_svg",
-            "canvas.insert",
-        ],
-    },
+    Section { tab: "SKETCH", panel: "REFERENCE", promoted: 1, ids: &["sketch.project", "sketch.intersect", "sketch.insert_dxf"] },
     // Sketch dimensions are driven by parameters, so they are one click away while sketching.
     Section { tab: "SKETCH", panel: "INSPECT", promoted: 1, ids: &["sketch.inspect"] },
-    Section { tab: "SKETCH", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
+    Section { tab: "SKETCH", panel: "CONFIGURE", promoted: 1, ids: CONFIGURE },
     Section { tab: "SKETCH", panel: "FINISH SKETCH", promoted: 2, ids: &["sketch.finish", "sketch.cancel"] },
-    // New Sketch leads the tab, as on MODEL: a sheet part starts from a sketch (#3250).
-    Section { tab: "SHEET METAL", panel: "SKETCH", promoted: 1, ids: &["sketch.create"] },
-    Section {
-        tab: "SHEET METAL",
-        panel: "CREATE",
-        promoted: 4,
-        ids: &["sheet.flange", "sheet.path_flange", "sheet.hem", "sheet.fold", "sheet.perforate", "sheet.convert"],
-    },
-    Section { tab: "SHEET METAL", panel: "FLAT", promoted: 3, ids: &["sheet.unfold", "sheet.refold", "sheet.flat_pattern"] },
-    Section { tab: "SHEET METAL", panel: "OUTPUT", promoted: 2, ids: &["sheet.export_dxf", "sheet.export_bend_table"] },
-    Section { tab: "SHEET METAL", panel: "RULES", promoted: 1, ids: &["sheet.manage_rules"] },
-    Section { tab: "SHEET METAL", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
-    // A frame starts from a sketch of its lines; its profile sizes are often parameters.
-    Section { tab: "WELDMENTS", panel: "SKETCH", promoted: 1, ids: &["sketch.create"] },
-    Section { tab: "WELDMENTS", panel: "CREATE", promoted: 1, ids: &["frame.member"] },
-    Section { tab: "WELDMENTS", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
 ];
 
 // Migration data only: Render commands remain registered, but have no live ribbon sections.
@@ -475,6 +373,9 @@ pub fn ribbon_family_label(family: &crate::sketch_families::Family) -> &'static 
 
 /// Registry placement → default ribbon destination, after explicit id overrides.
 pub const PLACEMENTS: &[(&str, &str, &str, &str)] = &[
+    ("SCOUT", "MEUBLE", "SCOUT", "MEUBLE"),
+    ("SCOUT", "COIN", "SCOUT", "COIN"),
+    ("SCOUT", "PLANS", "SCOUT", "PLANS"),
     ("SOLID", "CREATE", "MODEL", "CREATE"),
     ("SOLID", "MODIFY", "MODEL", "MODIFY"),
     ("SOLID", "CONSTRUCT", "MODEL", "CONSTRUCT"),
@@ -624,15 +525,14 @@ pub struct SpecialtyTab {
     pub icon: &'static str,
 }
 
-pub const SPECIALTY_TABS: &[SpecialtyTab] =
-    &[SpecialtyTab { tab: "SHEET METAL", icon: "sheet" }, SpecialtyTab { tab: "WELDMENTS", icon: "frame_member" }];
+pub const SPECIALTY_TABS: &[SpecialtyTab] = &[];
 
 /// A tab's row in the toolbar menu: the icon of the command that leads the tab (Model › Create ›
 /// Extrude, Inspect › Measure, View › Views and so on).
 pub fn tab_icon(tab: &str) -> &'static str {
     match tab {
         "MODEL" => "extrude",
-        "SURFACE" => "surface_extrude",
+        "SCOUT" => "component",
         "ASSEMBLE" => "joint",
         "INSERT" => "import",
         "INSPECT" => "measure",

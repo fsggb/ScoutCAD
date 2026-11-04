@@ -1,4 +1,4 @@
-name: Deploy SolidCraft web app to Pages
+name: Deploy SoLeadWorks web app to Pages
 
 on:
   push:

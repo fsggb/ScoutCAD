@@ -14,6 +14,8 @@ Editable drawing code, native projects and shipped exports are collected under `
 
 | File | Author | Source | Licence |
 |---|---|---|---|
+| assets/branding/soleadworks/logo-cathia.jpg, assets/branding/soleadworks/mark.png, assets/branding/soleadworks/32x32/soleadworks.png, assets/branding/soleadworks/256x256/soleadworks.png, assets/branding/soleadworks/512x512/soleadworks.png | FSGGB (logo CathIA) | CathIA.jpg of the fsggb/CathIA repository, cropped and resized | MIT OR Apache-2.0 |
+| assets/branding/soleadworks/wordmark.svg | FSGGB | original drawing (text only) | MIT OR Apache-2.0 |
 | assets/render/catalog/capabilities.json | SolidCraft contributors | Byte-identical runtime export of docs/render-materials/capabilities.json; generated and checked by tools/render-library/generate.py | MIT OR Apache-2.0 |
 | assets/render/catalog/environments.json | SolidCraft contributors | Byte-identical runtime export of docs/render-materials/environments.json; generated and checked by tools/render-library/generate.py | MIT OR Apache-2.0 |
 | assets/render/catalog/lighting.json | SolidCraft contributors | Byte-identical runtime export of docs/render-materials/lighting.json; generated and checked by tools/render-library/generate.py | MIT OR Apache-2.0 |

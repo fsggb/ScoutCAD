@@ -69,6 +69,7 @@ mod metadata;
 pub(crate) mod motion;
 mod parts;
 mod point_cloud;
+mod scout;
 mod script;
 mod section;
 pub mod settings;
@@ -82,6 +83,8 @@ mod plastic;
 mod print_face;
 mod render;
 mod render_ui;
+mod retired;
+pub use retired::is_retired;
 #[cfg(test)]
 mod script_tests;
 mod sheet;
@@ -292,6 +295,7 @@ pub fn not_in_sketch(s: &Session) -> std::result::Result<(), String> {
 /// Every command, in toolbar order.
 pub fn command_specs() -> Vec<&'static CommandSpec> {
     let mut v: Vec<&'static CommandSpec> = Vec::new();
+    v.extend(scout::COMMANDS.iter());
     v.extend(sketch::COMMANDS.iter());
     v.extend(sketch_create::COMMANDS.iter());
     v.extend(sketch_construction::COMMANDS.iter());
@@ -349,6 +353,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(diagnostics::COMMANDS.iter());
     v.extend(render::COMMANDS.iter());
     v.extend(render_ui::COMMANDS.iter());
+    v.retain(|c| !retired::is_retired(c.id));
     v
 }
 
