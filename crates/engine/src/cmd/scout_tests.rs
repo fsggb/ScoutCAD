@@ -75,8 +75,22 @@ fn bad_input_is_refused_not_panicked() {
 }
 
 #[test]
+fn the_html_export_holds_the_corner_and_every_furniture() {
+    let mut s = Session::default();
+    assert!(s.execute("scout.export.html", &json!({})).is_err());
+    run(&mut s, "scout.coin.create", json!({"name": "Coin des Lions"}));
+    run(&mut s, "scout.meuble.banc", json!({"name": "Banc seul"}));
+    let r = run(&mut s, "scout.export.html", json!({"title": "Camp d'été"}));
+    assert_eq!((r["coins"].as_u64(), r["meubles"].as_u64()), (Some(1), Some(6)), "{}", r["coins"]);
+    let html = r["html"].as_str().unwrap_or_default();
+    assert!(html.contains("Coin des Lions") && html.contains("Banc seul") && html.contains("Camp d&#39;été") || html.contains("Camp d'été"));
+    assert!(s.execute("scout.export.html", &json!({"path": "x.txt"})).is_err());
+}
+
+#[test]
 fn the_registry_has_no_sheet_metal_left() {
     assert!(crate::cmd::find_command("sheet.flange").is_none());
+    assert!(crate::cmd::find_command("surface.loft").is_some());
     assert!(crate::cmd::find_command("scout.meuble.banc").is_some());
     assert!(crate::cmd::find_command("solid.extrude").is_some());
 }

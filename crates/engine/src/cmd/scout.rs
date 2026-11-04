@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 
 use super::CommandSpec;
 use crate::params::{bad, num, str_, vec2};
-use crate::scout::plan::{Placed, coin_svg, meuble_svg, steps};
+use crate::scout::plan::{Placed, coin_svg, meuble_section, meuble_svg, page_html, steps};
 use crate::scout::templates::{self, Axis, Dims, Joint, Pole, TEMPLATES, cut_list, extent, wood_metres};
 use crate::{EngineError, Result, Session};
 
@@ -62,6 +62,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .doc_only()
         .params("coin?: id or name (default the only corner); path?: write the overview as a .svg file; author?; meuble_paths?: folder where every furniture's own plan is written too → svg, meubles, wood_m, plans?"),
+    CommandSpec::new("scout.export.html", "Exporter en HTML", export_html)
+        .at("SCOUT", "PLANS")
+        .icon("export")
+        .noundo()
+        .doc_only()
+        .params("path?: write a .html file (self-contained, no scripts, prints on A3); author?; title? → html, meubles (count), coins (count). Every patrol corner (its overview, then each furniture) and every furniture standing alone"),
 ];
 
 fn types() -> Value {
@@ -385,6 +391,58 @@ fn plan_coin(s: &mut Session, p: &Value) -> Result<Value> {
         out["plans"] = Value::Array(plans);
     }
     Ok(out)
+}
+
+fn export_html(s: &mut Session, p: &Value) -> Result<Value> {
+    let who = author(s, p);
+    let mut sections = Vec::new();
+    let (mut coins, mut count) = (0usize, 0usize);
+    let coin_ids: Vec<u64> = s.doc.components.iter().filter(|c| c.properties.contains_key(P_COIN)).map(|c| c.id).collect();
+    for coin in coin_ids {
+        let name = s.doc.components.iter().find(|c| c.id == coin).map(|c| c.name.clone()).unwrap_or_default();
+        let ids: Vec<u64> = s.doc.components.iter().filter(|c| c.parent == coin && c.properties.contains_key(P_KIND)).map(|c| c.id).collect();
+        let ms: Vec<Meuble> = ids.into_iter().filter_map(|id| read_meuble(s, id)).collect();
+        let placed: Vec<Placed> = ms
+            .iter()
+            .map(|m| {
+                let e = extent(&m.poles);
+                Placed { name: m.name.clone(), kind: templates::template(&m.kind).map_or(m.kind.clone(), |t| t.name.to_string()), x: m.place.0, y: m.place.1, length: e[0], width: e[1], rotation: m.place.2, wood_m: wood_metres(&m.poles) }
+            })
+            .collect();
+        sections.push(format!("<section class=\"meuble\"><h2>{}</h2><p class=\"sub\">Coin de patrouille · {} meubles</p>{}</section>\n", name.replace('<', "&lt;").replace('&', "&amp;"), ms.len(), coin_svg(&name, &who, &placed)));
+        for m in &ms {
+            let tpl = templates::template(&m.kind).map_or(m.kind.as_str(), |t| t.name);
+            sections.push(meuble_section(&m.name, tpl, &who, &m.poles));
+            count += 1;
+        }
+        coins += 1;
+    }
+    let loose: Vec<u64> = s
+        .doc
+        .components
+        .iter()
+        .filter(|c| c.properties.contains_key(P_KIND) && !s.doc.components.iter().any(|k| k.id == c.parent && k.properties.contains_key(P_COIN)))
+        .map(|c| c.id)
+        .collect();
+    for id in loose {
+        if let Some(m) = read_meuble(s, id) {
+            let tpl = templates::template(&m.kind).map_or(m.kind.as_str(), |t| t.name);
+            sections.push(meuble_section(&m.name, tpl, &who, &m.poles));
+            count += 1;
+        }
+    }
+    if count == 0 {
+        return Err(bad("scout.export.html", "the design has no furniture yet (Scout tab)"));
+    }
+    let title = str_(p, "title").map(str::trim).filter(|x| !x.is_empty()).unwrap_or("Plans du camp").to_string();
+    let html = page_html(&title, &sections);
+    if let Some(path) = str_(p, "path") {
+        if !path.to_ascii_lowercase().ends_with(".html") {
+            return Err(EngineError::Other(format!("{path}: write the export as a .html file")));
+        }
+        solidcraft_io::vfs::write(path, html.as_bytes()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    }
+    Ok(json!({"html": html, "meubles": count, "coins": coins}))
 }
 
 #[cfg(test)]

@@ -211,6 +211,79 @@ pub fn meuble_svg(title: &str, kind: &str, author: &str, poles: &[Pole]) -> Stri
     o
 }
 
+/// An isometric picture of the poles (no scripts: poles are thick lines, far ones first).
+pub fn iso_svg(poles: &[Pole]) -> String {
+    let proj = |p: [f64; 3]| ((p[0] - p[1]) * 0.866_025, (p[0] + p[1]) * 0.5 - p[2]);
+    let mut order: Vec<&Pole> = poles.iter().collect();
+    let depth = |p: &Pole| {
+        let (s, e) = (p.origin, p.end());
+        (s[0] + e[0] + s[1] + e[1]) / 2.0 + (s[2] + e[2]) * 0.5
+    };
+    order.sort_by(|a, b| depth(a).partial_cmp(&depth(b)).unwrap_or(std::cmp::Ordering::Equal));
+    let (mut x0, mut y0, mut x1, mut y1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+    for p in poles {
+        for q in [p.origin, p.end()] {
+            let (x, y) = proj(q);
+            let r = p.diameter / 2.0;
+            (x0, y0, x1, y1) = (x0.min(x - r), y0.min(y - r), x1.max(x + r), y1.max(y + r));
+        }
+    }
+    if poles.is_empty() {
+        (x0, y0, x1, y1) = (0.0, 0.0, 1.0, 1.0);
+    }
+    let mut o = String::new();
+    let _ = writeln!(o, "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{:.1} {:.1} {:.1} {:.1}\" class=\"iso\">", x0 - 20.0, y0 - 20.0, x1 - x0 + 40.0, y1 - y0 + 40.0);
+    for p in order {
+        let ((ax, ay), (bx, by)) = (proj(p.origin), proj(p.end()));
+        let _ = writeln!(o, "<line x1=\"{ax:.1}\" y1=\"{ay:.1}\" x2=\"{bx:.1}\" y2=\"{by:.1}\" stroke=\"#4a2f12\" stroke-width=\"{:.1}\"/>", p.diameter + 3.0);
+        let _ = writeln!(o, "<line x1=\"{ax:.1}\" y1=\"{ay:.1}\" x2=\"{bx:.1}\" y2=\"{by:.1}\" stroke=\"#d9b77a\" stroke-width=\"{:.1}\"/>", p.diameter);
+    }
+    o.push_str("</svg>\n");
+    o
+}
+
+/// One furniture as an HTML section: its isometric picture, the plan sheet, the cut list and the
+/// building order.
+pub fn meuble_section(title: &str, kind: &str, author: &str, poles: &[Pole]) -> String {
+    let mut o = String::new();
+    let _ = writeln!(o, "<section class=\"meuble\"><h2>{}</h2><p class=\"sub\">{} · {} m de bois</p>", esc(title), esc(kind), mm(wood_metres(poles)));
+    o.push_str(&iso_svg(poles));
+    o.push_str("<table><tr><th>Qté</th><th>Pièce</th><th>Ø mm</th><th>Visible</th><th>À débiter</th></tr>");
+    for r in cut_list(poles) {
+        let _ = write!(o, "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>", r.count, esc(r.role), mm(r.diameter), mm(r.length), mm(r.cut_length));
+    }
+    o.push_str("</table><ol>");
+    for s in steps(poles) {
+        let _ = write!(o, "<li>{}</li>", esc(&s));
+    }
+    o.push_str("</ol>");
+    o.push_str(&meuble_svg(title, kind, author, poles));
+    o.push_str("</section>\n");
+    o
+}
+
+/// A whole self-contained page (no scripts, no external files), printable on A3 landscape.
+pub fn page_html(title: &str, sections: &[String]) -> String {
+    let mut o = String::new();
+    let _ = writeln!(
+        o,
+        "<!doctype html><html lang=\"fr\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{t}</title><style>\
+@page{{size:A3 landscape;margin:8mm}}body{{font:15px system-ui,sans-serif;color:#1d2330;margin:0;background:#f1f2f4}}\
+header{{background:#000761;color:#fff;padding:14px 24px}}header b{{color:#ff5a62}}h1{{margin:0;font-size:22px}}\
+.meuble{{background:#fff;margin:16px auto;max-width:1100px;padding:16px 24px;border-radius:8px;break-after:page}}\
+.sub{{color:#6b7280;margin-top:-8px}}.iso{{width:100%;max-height:360px}}\
+table{{border-collapse:collapse;margin:12px 0}}td,th{{border:1px solid #d5d8de;padding:4px 10px;text-align:left}}th{{background:#eef0f4}}\
+svg.iso+table{{width:100%}}section>svg:last-child{{width:100%;height:auto;border:1px solid #d5d8de}}\
+</style></head><body><header><h1><b>SO</b><b style=\"color:#ff5a62\">LEAD</b>WORKS · {t}</h1></header>",
+        t = esc(title)
+    );
+    for s in sections {
+        o.push_str(s);
+    }
+    o.push_str("</body></html>\n");
+    o
+}
+
 /// Greedy word wrap at `width` characters.
 fn wrap(s: &str, width: usize) -> Vec<String> {
     let mut lines = Vec::new();
@@ -330,6 +403,15 @@ mod tests {
         assert_eq!(footprint(&p), (-800.0, 0.0, 0.0, 1500.0));
         p.rotation = 270.0;
         assert_eq!(footprint(&p), (0.0, -1500.0, 800.0, 0.0));
+    }
+
+    #[test]
+    fn the_html_page_is_self_contained() {
+        let poles = build("table", Dims::of(&TEMPLATES[2])).unwrap_or_default();
+        let html = page_html("Coin <x>", &[meuble_section("Table", "Table", "Lou", &poles)]);
+        assert!(html.starts_with("<!doctype html>") && html.contains("Coin &lt;x&gt;"));
+        assert!(!html.contains("<script"));
+        assert!(html.contains("class=\"iso\"") && html.contains("Liste de débit"));
     }
 
     #[test]
