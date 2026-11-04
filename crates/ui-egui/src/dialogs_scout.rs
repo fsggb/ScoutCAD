@@ -104,6 +104,7 @@ fn template_name(kind: usize) -> &'static str {
 /// The command OK runs.
 pub fn commands(k: &Mb) -> Result<Vec<(String, Value)>, String> {
     let t = TEMPLATES.get(k.kind).and_then(|t| template(t.id)).ok_or("choisissez un meuble")?;
+    let rotation: u32 = [0, 90, 180, 270].get(k.rotation).copied().unwrap_or(0);
     let mut p = json!({
         "type": t.id,
         "length": number("Longueur", &k.length)?,
@@ -113,7 +114,7 @@ pub fn commands(k: &Mb) -> Result<Vec<(String, Value)>, String> {
         "rail": number("Ø traverses", &k.rail)?,
         "claie": number("Ø claies", &k.claie)?,
         "at": [number("Position X", &k.x)?, number("Position Y", &k.y)?],
-        "rotation": [0, 90, 180, 270].get(k.rotation).copied().unwrap_or(0),
+        "rotation": rotation,
     });
     if !k.name.trim().is_empty() {
         p["name"] = json!(k.name.trim());
