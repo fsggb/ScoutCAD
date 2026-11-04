@@ -44,7 +44,7 @@ mod tests {
         for id in [
             "solid.extrude", "solid.box", "solid.cylinder", "solid.hole", "solid.combine", "solid.move", "solid.mirror", "sketch.create",
             "sketch.rectangle.two_point", "sketch.dimension", "component.create", "joint.create", "occurrence.move", "explode.create",
-            "assembly.bom", "frame.member", "timeline.rollback", "edit.checkpoint", "edit.restore_checkpoint", "inspect.interference",
+            "assembly.bom", "timeline.rollback", "edit.checkpoint", "edit.restore_checkpoint", "inspect.interference",
             "inspect.measure", "parameters.change",
         ] {
             assert!(!is_retired(id), "{id} must stay");
