@@ -54,6 +54,9 @@ fn all_eleven_models_build_through_the_command() {
         let mut s = Session::default();
         let r = run(&mut s, "scout.meuble.create", json!({"type": m.id}));
         assert!(r["poles"].as_u64().unwrap_or(0) >= 5, "{} {r}", m.id);
+        // one body per pole: the cuts that shape the joints leave no loose piece behind
+        let bodies: Vec<String> = s.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+        assert_eq!(bodies.len() as u64, r["poles"].as_u64().unwrap_or(0), "{}: {bodies:?}", m.id);
         let plan = run(&mut s, "scout.atelier.dessin", json!({}));
         assert_eq!(plan["type"], m.id);
         assert!(plan["svg"].as_str().is_some_and(|x| x.contains("Nomenclature") && x.contains("Vue de face")), "{}", m.id);
