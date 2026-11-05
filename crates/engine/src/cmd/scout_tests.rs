@@ -338,16 +338,15 @@ fn shaping_a_placed_pole_changes_its_volume_as_it_should() {
 }
 
 #[test]
-fn debug_bench_bodies() {
+fn a_bench_leg_is_one_body_that_stays_inside_the_seat() {
     let mut s = Session::default();
     run(&mut s, "scout.meuble.create", json!({"type": "banc"}));
     let st = s.world_state();
-    for b in st.bodies.iter() {
-        let m = b.mesh().bounds();
-        println!("DBG body {:?}: x {:.0}..{:.0} y {:.0}..{:.0} z {:.0}..{:.0}", b.name, m.min.x, m.max.x, m.min.y, m.max.y, m.min.z, m.max.z);
+    // five poles, five bodies: no loose disc left by the cut that shapes a leg's end
+    assert_eq!(st.bodies.len(), 5, "{:?}", st.bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>());
+    for b in st.bodies.iter().filter(|b| b.name.starts_with("pied")) {
+        assert!(b.mesh().bounds().max.z <= 450.0, "{}: {:?}", b.name, b.mesh().bounds().max);
     }
-    let pied = s.doc.components.iter().find(|c| c.name.starts_with("pied 1")).and_then(|c| c.properties.get("scout_pole")).cloned();
-    println!("DBG pied1 {:?}", pied);
-    let rondin = s.doc.components.iter().find(|c| c.name.starts_with("rondin")).and_then(|c| c.properties.get("scout_pole")).cloned();
-    println!("DBG rondin {:?}", rondin);
+    let all = run(&mut s, "inspect.interference", json!({}));
+    assert!(all["interferences"].as_array().is_none_or(Vec::is_empty), "{all}");
 }

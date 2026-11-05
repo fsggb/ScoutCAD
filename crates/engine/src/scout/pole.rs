@@ -363,8 +363,11 @@ impl Build {
         if pr.width == 0.0 && ptn.width == 0.0 {
             // the end of `t` is cut to the curve of `r`, so the two meet without a gap or an overlap
             let rt = ptn.radius();
-            let far = (r_in * r_in - (off.abs() + rt).powi(2)).max(0.0).sqrt();
-            let extra = ((r_in - far) / sin + 2.0).min(chord * 0.9);
+            let big_r = pr.radius();
+            let far = (big_r * big_r - (off.abs() + rt).powi(2)).max(0.0).sqrt();
+            // never longer than the wood there is: an end that came out of a split log's flat face
+            // would be left as a loose disc
+            let extra = ((r_in - far) / sin + 2.0).min(chord * 0.9).min(avail - 3.0).max(0.0);
             self.poles[t].push(Op::Saddle { with: format!("#{r}"), end, extra })?;
         }
         // The mortise: on `t`'s line, from just outside the surface of `r`.
