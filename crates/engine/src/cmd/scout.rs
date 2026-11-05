@@ -209,17 +209,29 @@ fn combine(s: &mut Session, name: &str, tool: &str, operation: &str) -> Result<(
     Ok(())
 }
 
+/// A point or a direction of the pole's own frame, as the commands take it: in the world, with the
+/// placement of the component being edited (a component placed since it was built reads the numbers
+/// of the features it is given in the world, and keeps the boxes aligned with its own axes).
+fn world_point(s: &Session, p: V3) -> V3 {
+    let q = solidcraft_doc::apply_point(&s.active_component_frame(), solidcraft_geom::Vec3::new(p[0], p[1], p[2]));
+    [q.x, q.y, q.z]
+}
+
+fn world_dir(s: &Session, v: V3) -> V3 {
+    let q = solidcraft_doc::apply_vector(&s.active_component_frame(), solidcraft_geom::Vec3::new(v[0], v[1], v[2]));
+    [q.x, q.y, q.z]
+}
+
 fn tool_cylinder(s: &mut Session, tool: &str, base: V3, axis: V3, d: f64, h: f64) -> Result<()> {
+    let (base, axis) = (world_point(s, base), world_dir(s, axis));
     run(s, "solid.cylinder", json!({"base": base, "axis": axis, "diameter": d, "height": h, "body_name": tool}))?;
     Ok(())
 }
 
 fn tool_box(s: &mut Session, tool: &str, centre: V3, half: V3) -> Result<()> {
-    run(
-        s,
-        "solid.box",
-        json!({"corner": [centre[0] - half[0], centre[1] - half[1], centre[2] - half[2]], "length": 2.0 * half[0], "width": 2.0 * half[1], "height": 2.0 * half[2], "body_name": tool}),
-    )?;
+    // the box's corner (its smallest x, y, z in the pole's frame) taken into the world
+    let corner = world_point(s, [centre[0] - half[0], centre[1] - half[1], centre[2] - half[2]]);
+    run(s, "solid.box", json!({"corner": corner, "length": 2.0 * half[0], "width": 2.0 * half[1], "height": 2.0 * half[2], "body_name": tool}))?;
     Ok(())
 }
 
@@ -367,7 +379,8 @@ fn apply_op(s: &mut Session, name: &str, pole: &Pole, op: &Op) -> Result<()> {
             tool_box(s, &tool, [0.0, 0.0, zc], [big, big, hz])?;
             combine(s, name, &tool, "cut")?;
             let cone = tool_name(name);
-            run(s, "solid.cone", json!({"base": [0.0, 0.0, at - sgn], "axis": [0.0, 0.0, sgn], "radius": r, "height": *len + 1.0, "body_name": cone}))?;
+            let (cb, ca) = (world_point(s, [0.0, 0.0, at - sgn]), world_dir(s, [0.0, 0.0, sgn]));
+            run(s, "solid.cone", json!({"base": cb, "axis": ca, "radius": r, "height": *len + 1.0, "body_name": cone}))?;
             combine(s, name, &cone, "join")?;
         }
     }

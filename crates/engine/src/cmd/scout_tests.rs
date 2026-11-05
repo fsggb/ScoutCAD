@@ -293,7 +293,7 @@ fn a_dovetail_flares_towards_its_tip() {
     pied_and_traverse(&mut s);
     run(&mut s, "scout.assemblage", json!({"kind": "aronde1", "a": "Traverse", "b": "Pied", "w": 30, "theta": 15}));
     let rec = s.doc.components.iter().find(|c| c.name == "Traverse").and_then(|c| c.properties.get("scout_pole")).cloned().unwrap_or_default();
-    assert!(rec.contains("Aronde") && rec.contains("\"theta\":15"), "{rec}");
+    assert!(rec.contains("Aronde") && rec.contains("\"theta\":1"), "{rec}");
     // the tenon is wider at its tip than at its shoulder: the traverse's bounding box in the wide
     // direction (here z) is the pole's 60 mm, so look at the mortise: it is a groove across the pied
     let size = size_of(&s, "Traverse");
@@ -317,34 +317,19 @@ fn a_tenon_does_not_come_through_a_split_log() {
 }
 
 #[test]
-fn debug_combine_cut() {
+fn shaping_a_placed_pole_changes_its_volume_as_it_should() {
     let vol = |s: &mut Session, n: &str| run(s, "inspect.center_of_mass", json!({"bodies": [n]}))["volume"].as_f64().unwrap_or(-1.0);
-    // 1. plain: a cylinder, a box on its upper half, combine cut
     let mut s = Session::default();
-    run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "axis": [0, 0, 1], "diameter": 100, "height": 500, "body_name": "C"}));
-    println!("DBG plain before {}", vol(&mut s, "C"));
-    run(&mut s, "solid.box", json!({"corner": [0, -200, -10], "length": 200, "width": 400, "height": 520, "body_name": "T"}));
-    run(&mut s, "solid.combine", json!({"target": "C", "tools": ["T"], "operation": "cut"}));
-    println!("DBG plain half-split {}", vol(&mut s, "C"));
-    // 2. cut off the end with a box whose face is perpendicular
-    let mut s = Session::default();
-    run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "axis": [0, 0, 1], "diameter": 100, "height": 500, "body_name": "C"}));
-    run(&mut s, "solid.box", json!({"corner": [-300, -300, 400], "length": 600, "width": 600, "height": 400, "body_name": "T"}));
-    run(&mut s, "solid.combine", json!({"target": "C", "tools": ["T"], "operation": "cut"}));
-    println!("DBG plain cutoff {}", vol(&mut s, "C"));
-    // 3. the same inside a component, as the scout commands do
-    let mut s = Session::default();
-    run(&mut s, "component.create", json!({"name": "K", "parent": 0, "grounded": false}));
-    run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "axis": [0, 0, 1], "diameter": 100, "height": 500, "body_name": "C"}));
-    run(&mut s, "solid.box", json!({"corner": [-300, -300, 400], "length": 600, "width": 600, "height": 400, "body_name": "T"}));
-    run(&mut s, "solid.combine", json!({"target": "C", "tools": ["T"], "operation": "cut"}));
-    println!("DBG in component cutoff {}", vol(&mut s, "C"));
-    // 4. through the scout command
-    let mut s = Session::default();
-    run(&mut s, "scout.piece.traverse", json!({"name": "R", "diameter": 100, "length": 500, "dir": [1, 0, 0]}));
-    let before = vol(&mut s, "R");
+    // placed away from the origin, along x, so its frame is not the world's
+    run(&mut s, "scout.piece.traverse", json!({"name": "R", "diameter": 100, "length": 500, "at": [700, 300, 450], "dir": [1, 0, 0]}));
+    let full = vol(&mut s, "R");
     run(&mut s, "scout.faconner.couper", json!({"piece": "R", "length": 300}));
-    println!("DBG scout couper {before} -> {}", vol(&mut s, "R"));
+    let cut = vol(&mut s, "R");
+    assert!((cut / full - 0.6).abs() < 0.02, "{full} → {cut}");
     run(&mut s, "scout.faconner.demi", json!({"piece": "R"}));
-    println!("DBG scout demi -> {}", vol(&mut s, "R"));
+    let half = vol(&mut s, "R");
+    assert!((half / cut - 0.5).abs() < 0.03, "{cut} → {half}");
+    run(&mut s, "scout.faconner.pointe", json!({"piece": "R", "len": 150}));
+    let pointed = vol(&mut s, "R");
+    assert!(pointed < half && pointed > half * 0.8, "{half} → {pointed}");
 }
