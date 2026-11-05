@@ -336,3 +336,18 @@ fn shaping_a_placed_pole_changes_its_volume_as_it_should() {
     let pointed = vol(&mut s, "R");
     assert!(pointed < half && pointed > half * 0.8, "{half} → {pointed}");
 }
+
+#[test]
+fn debug_bench_bodies() {
+    let mut s = Session::default();
+    run(&mut s, "scout.meuble.create", json!({"type": "banc"}));
+    let st = s.world_state();
+    for b in st.bodies.iter() {
+        let m = b.mesh().bounds();
+        println!("DBG body {:?}: x {:.0}..{:.0} y {:.0}..{:.0} z {:.0}..{:.0}", b.name, m.min.x, m.max.x, m.min.y, m.max.y, m.min.z, m.max.z);
+    }
+    let pied = s.doc.components.iter().find(|c| c.name.starts_with("pied 1")).and_then(|c| c.properties.get("scout_pole")).cloned();
+    println!("DBG pied1 {:?}", pied);
+    let rondin = s.doc.components.iter().find(|c| c.name.starts_with("rondin")).and_then(|c| c.properties.get("scout_pole")).cloned();
+    println!("DBG rondin {:?}", rondin);
+}
