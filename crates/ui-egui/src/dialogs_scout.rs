@@ -287,7 +287,8 @@ pub fn commands(k: &Sc, inputs: &[SelInput]) -> Result<Vec<(String, Value)>, Str
     let p = match k.which {
         Which::Meuble => {
             let m = MODELS.get(k.kind).ok_or("choisissez un meuble")?;
-            let mut p = json!({"type": m.id, "at": [number("Position X", &k.x)?, number("Position Y", &k.y)?], "rotation": [0, 90, 180, 270].get(k.rotation).copied().unwrap_or(0)});
+            let rotation: u32 = [0, 90, 180, 270].get(k.rotation).copied().unwrap_or(0);
+            let mut p = json!({"type": m.id, "at": [number("Position X", &k.x)?, number("Position Y", &k.y)?], "rotation": rotation});
             for (d, v) in m.params.iter().zip(&k.vals) {
                 p[d.key] = json!(number(d.label, v)?);
             }
@@ -323,12 +324,11 @@ pub fn commands(k: &Sc, inputs: &[SelInput]) -> Result<Vec<(String, Value)>, Str
             }
             p
         }
-        Which::Traverse => json!({
-            "diameter": number("Diamètre", &k.a)?,
-            "length": number("Longueur", &k.b)?,
-            "dir": [[1, 0, 0], [0, 1, 0], [0, 0, 1]].get(k.dir).copied().unwrap_or([1, 0, 0]),
-            "at": [number("Position X", &k.x)?, number("Position Y", &k.y)?, number("Diamètre", &k.a)? / 2.0],
-        }),
+        Which::Traverse => {
+            let dir: [u8; 3] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]].get(k.dir).copied().unwrap_or([1, 0, 0]);
+            let d = number("Diamètre", &k.a)?;
+            json!({"diameter": d, "length": number("Longueur", &k.b)?, "dir": dir, "at": [number("Position X", &k.x)?, number("Position Y", &k.y)?, d / 2.0]})
+        }
         Which::Equerre => json!({"unit": number("Unité", &k.a)?, "d": number("Diamètre", &k.b)?}),
         Which::Claies => json!({"long": number("Longueur", &k.a)?, "larg": number("Largeur", &k.b)?, "dc": number("Diamètre", &k.c)?}),
         Which::Filet => json!({"long": number("Longueur", &k.a)?, "larg": number("Largeur", &k.b)?, "maille": number("Maille", &k.c)?}),
