@@ -189,37 +189,129 @@ fn part_number(kind: &str, pole: &Pole) -> String {
     format!("{}-{}-{}", kind.to_uppercase(), pole.role.to_uppercase().replace([' ', '\''], "_"), size)
 }
 
-/// Applies one operation to a pole's body (named `name`), in the pole's own frame.
+thread_local! {
+    static TOOLS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// A fresh name for a cutting or joining tool body.
+fn tool_name(name: &str) -> String {
+    let n = TOOLS.with(|c| {
+        c.set(c.get() + 1);
+        c.get()
+    });
+    format!("{name} outil {n}")
+}
+
+/// A new body for a tool, then `solid.combine` of it into the pole's body: the interface's own
+/// Boolean, so every tenon, mortise, notch and split is a Combine in the history.
+fn combine(s: &mut Session, name: &str, tool: &str, operation: &str) -> Result<()> {
+    run(s, "solid.combine", json!({"target": name, "tools": [tool], "operation": operation}))?;
+    Ok(())
+}
+
+fn tool_cylinder(s: &mut Session, tool: &str, base: V3, axis: V3, d: f64, h: f64) -> Result<()> {
+    run(s, "solid.cylinder", json!({"base": base, "axis": axis, "diameter": d, "height": h, "body_name": tool}))?;
+    Ok(())
+}
+
+fn tool_box(s: &mut Session, tool: &str, centre: V3, half: V3) -> Result<()> {
+    run(
+        s,
+        "solid.box",
+        json!({"corner": [centre[0] - half[0], centre[1] - half[1], centre[2] - half[2]], "length": 2.0 * half[0], "width": 2.0 * half[1], "height": 2.0 * half[2], "body_name": tool}),
+    )?;
+    Ok(())
+}
+
+/// The sketch plane whose normal is the local axis `s`, and the sketch coordinates of a point on it
+/// (the plane XZ draws z downwards; the offset runs along the normal, +y, +x, +z).
+fn sketch_plane(s: usize) -> &'static str {
+    match s {
+        0 => "YZ",
+        1 => "XZ",
+        _ => "XY",
+    }
+}
+
+fn to_sketch(plane: &str, p: V3) -> [f64; 2] {
+    match plane {
+        "XZ" => [p[0], -p[2]],
+        "YZ" => [p[1], p[2]],
+        _ => [p[0], p[1]],
+    }
+}
+
+/// A prism: a polygon (model points on the plane with normal axis `s`) extruded `thickness`, centred
+/// on the plane, as a new body named `tool`.
+fn tool_prism(s: &mut Session, tool: &str, axis: usize, offset: f64, pts: &[V3], thickness: f64) -> Result<()> {
+    let plane = sketch_plane(axis);
+    let mut list: Vec<[f64; 2]> = pts.iter().map(|q| to_sketch(plane, *q)).collect();
+    if let Some(first) = list.first().copied() {
+        list.push(first);
+    }
+    run(s, "sketch.create", json!({"plane": plane, "offset": offset}))?;
+    run(s, "sketch.line", json!({"points": list}))?;
+    run(s, "sketch.finish", json!({}))?;
+    run(s, "solid.extrude", json!({"distance": thickness, "direction": "symmetric", "body_name": tool}))?;
+    Ok(())
+}
+
+/// Applies one operation to a pole's body (named `name`), in the pole's own frame, with tool bodies
+/// and Combine.
 fn apply_op(s: &mut Session, name: &str, pole: &Pole, op: &Op) -> Result<()> {
-    let target = json!([name]);
-    let cyl = |s: &mut Session, base: V3, axis: V3, d: f64, h: f64, operation: &str| -> Result<()> {
-        run(s, "solid.cylinder", json!({"base": base, "axis": axis, "diameter": d, "height": h, "operation": operation, "targets": target}))?;
-        Ok(())
-    };
-    let cuboid = |s: &mut Session, centre: V3, half: V3, operation: &str| -> Result<()> {
-        run(
-            s,
-            "solid.box",
-            json!({"corner": [centre[0] - half[0], centre[1] - half[1], centre[2] - half[2]], "length": 2.0 * half[0], "width": 2.0 * half[1], "height": 2.0 * half[2], "operation": operation, "targets": target}),
-        )?;
-        Ok(())
-    };
     let big = pole.radius() * 2.0 + 4.0;
     match op {
-        Op::Tenon { end, style, d, w, len, wide, .. } => {
+        Op::Tenon { end, style, d, w, len, wide, theta, typ } => {
             let (z, sgn) = if *end == End::Start { (pole.start, -1.0) } else { (pole.start + pole.length, 1.0) };
+            let tool = tool_name(name);
             if style.round() {
-                cyl(s, [0.0, 0.0, z], [0.0, 0.0, sgn], *d, *len, "join")?;
+                // a little into the pole, so the stub is joined and not merely touching
+                tool_cylinder(s, &tool, [0.0, 0.0, z - sgn], [0.0, 0.0, sgn], *d, len + 1.0)?;
+            } else if *style == Style::Aronde {
+                // a dovetail: narrow at the shoulder, flaring towards the tip, `d` thick
+                let (hn, ht) = (w / 2.0, w / 2.0 + len * theta.to_radians().tan());
+                let (z0, z1) = (z - sgn, z + sgn * len);
+                let pts: Vec<V3> = if *wide == 0 {
+                    vec![[-hn, 0.0, z0], [hn, 0.0, z0], [ht, 0.0, z1], [-ht, 0.0, z1]]
+                } else {
+                    vec![[0.0, -hn, z0], [0.0, hn, z0], [0.0, ht, z1], [0.0, -ht, z1]]
+                };
+                tool_prism(s, &tool, if *wide == 0 { 1 } else { 0 }, 0.0, &pts, *d)?;
+                let _ = typ;
             } else {
                 let (sx, sy) = if *wide == 0 { (*w, *d) } else { (*d, *w) };
-                // a little into the pole, so the stub is joined, not just touching
                 let (z0, h) = if sgn > 0.0 { (z - 1.0, len + 1.0) } else { (z - len, len + 1.0) };
-                cuboid(s, [0.0, 0.0, z0 + h / 2.0], [sx / 2.0, sy / 2.0, h / 2.0], "join")?;
+                tool_box(s, &tool, [0.0, 0.0, z0 + h / 2.0], [sx / 2.0, sy / 2.0, h / 2.0])?;
             }
+            combine(s, name, &tool, "join")?;
         }
-        Op::Mortise { c, u, style, d, w, depth, .. } => {
+        Op::Mortise { c, u, style, d, w, depth, wide, theta, typ, open } => {
+            let tool = tool_name(name);
             if style.round() {
-                cyl(s, *c, *u, *d, *depth, "cut")?;
+                tool_cylinder(s, &tool, *c, *u, *d, *depth)?;
+            } else if *style == Style::Aronde {
+                // the groove across (or along) the receiving pole that the dovetail slides into
+                let m = dominant(*u);
+                let sign = if u[m] >= 0.0 { 1.0 } else { -1.0 };
+                let (wdir, slide) = if m == 2 {
+                    (0, 1)
+                } else if *typ == 3 {
+                    (1 - m, 2)
+                } else {
+                    (2, 1 - m)
+                };
+                let _ = wide;
+                let len = (depth - 3.0 - 1.0).max(1.0);
+                let (hn, ht) = (w / 2.0, w / 2.0 + len * theta.to_radians().tan());
+                let at = |dist: f64, hw: f64, side: f64| -> V3 {
+                    let mut p = *c;
+                    p[m] += sign * dist;
+                    p[wdir] += side * hw;
+                    p
+                };
+                let far = 3.0 + len + 1.0;
+                let pts = vec![at(0.0, hn, -1.0), at(0.0, hn, 1.0), at(3.0, hn, 1.0), at(far, ht, 1.0), at(far, ht, -1.0), at(3.0, hn, -1.0)];
+                tool_prism(s, &tool, slide, c[slide], &pts, open.max(*d))?;
             } else {
                 let m = dominant(*u);
                 let sign = if u[m] >= 0.0 { 1.0 } else { -1.0 };
@@ -234,31 +326,49 @@ fn apply_op(s: &mut Session, name: &str, pole: &Pole, op: &Op) -> Result<()> {
                     half[2] = w / 2.0;
                     half[1 - m] = d / 2.0;
                 }
-                cuboid(s, centre, half, "cut")?;
+                tool_box(s, &tool, centre, half)?;
             }
+            combine(s, name, &tool, "cut")?;
         }
-        Op::Notch { c, h } => cuboid(s, *c, *h, "cut")?,
-        Op::Hole { c, u, d, depth } => cyl(s, *c, *u, *d, *depth, "cut")?,
+        Op::Notch { c, h } => {
+            let tool = tool_name(name);
+            tool_box(s, &tool, *c, *h)?;
+            combine(s, name, &tool, "cut")?;
+        }
+        Op::Hole { c, u, d, depth } => {
+            let tool = tool_name(name);
+            tool_cylinder(s, &tool, *c, *u, *d, *depth)?;
+            combine(s, name, &tool, "cut")?;
+        }
         Op::Split { mode } => {
             let (zc, hz) = (pole.start + pole.length / 2.0, pole.length / 2.0 + 2.0);
             // everything on the +x side goes
-            cuboid(s, [big / 2.0, 0.0, zc], [big / 2.0, big, hz], "cut")?;
+            let tool = tool_name(name);
+            tool_box(s, &tool, [big / 2.0, 0.0, zc], [big / 2.0, big, hz])?;
+            combine(s, name, &tool, "cut")?;
             if *mode == SplitMode::Quart {
                 // and, of the remaining half, the +y side
-                cuboid(s, [-big / 2.0, big / 2.0, zc], [big / 2.0, big / 2.0, hz], "cut")?;
+                let tool = tool_name(name);
+                tool_box(s, &tool, [-big / 2.0, big / 2.0, zc], [big / 2.0, big / 2.0, hz])?;
+                combine(s, name, &tool, "cut")?;
             }
         }
         Op::CutOff { end, at } => {
             let (zc, hz) = if *end == End::End { (at + pole.length + 10.0, pole.length + 10.0) } else { (at - pole.length - 10.0, pole.length + 10.0) };
-            cuboid(s, [0.0, 0.0, zc], [big, big, hz], "cut")?;
+            let tool = tool_name(name);
+            tool_box(s, &tool, [0.0, 0.0, zc], [big, big, hz])?;
+            combine(s, name, &tool, "cut")?;
         }
         Op::Point { end, len } => {
             let r = pole.radius();
-            let (z, sgn) = if *end == End::Start { (pole.start + len, -1.0) } else { (pole.start + pole.length - len, 1.0) };
-            let at = if *end == End::Start { z } else { z };
+            let (at, sgn) = if *end == End::Start { (pole.start + len, -1.0) } else { (pole.start + pole.length - len, 1.0) };
             let (zc, hz) = if *end == End::End { (at + len / 2.0 + 5.0, len / 2.0 + 5.0) } else { (at - len / 2.0 - 5.0, len / 2.0 + 5.0) };
-            cuboid(s, [0.0, 0.0, zc], [big, big, hz], "cut")?;
-            run(s, "solid.cone", json!({"base": [0.0, 0.0, at], "axis": [0.0, 0.0, sgn], "radius": r, "height": *len, "operation": "join", "targets": target}))?;
+            let tool = tool_name(name);
+            tool_box(s, &tool, [0.0, 0.0, zc], [big, big, hz])?;
+            combine(s, name, &tool, "cut")?;
+            let cone = tool_name(name);
+            run(s, "solid.cone", json!({"base": [0.0, 0.0, at - sgn], "axis": [0.0, 0.0, sgn], "radius": r, "height": *len + 1.0, "body_name": cone}))?;
+            combine(s, name, &cone, "join")?;
         }
     }
     Ok(())
@@ -452,9 +562,7 @@ fn style_of(kind: &str) -> Option<(Style, bool)> {
         "hache" => (Style::Hache, false),
         "scie" => (Style::Scie, false),
         "plat" | "platscie" => (Style::Plat, false),
-        "aronde1" => (Style::Aronde, false),
-        "aronde2" => (Style::Aronde, true),
-        "aronde3" => (Style::Aronde, false),
+        "aronde1" | "aronde2" | "aronde3" => (Style::Aronde, false),
         _ => return None,
     })
 }
@@ -483,6 +591,11 @@ fn assemblage(s: &mut Session, p: &Value) -> Result<Value> {
                 o.w = num(p, "w").unwrap_or(0.0);
                 o.theta = num(p, "theta").unwrap_or(if style == Style::Aronde { 20.0 } else { 0.0 });
                 o.through = through || p.get("through").and_then(Value::as_bool).unwrap_or(false);
+                o.typ = match other {
+                    "aronde2" => 2,
+                    "aronde3" => 3,
+                    _ => 1,
+                };
                 build.tenon(0, 1, o)
             }
             None => return Err(bad(cmd, format!("unknown kind `{other}`"))),

@@ -243,15 +243,75 @@ fn a_half_lap_can_be_pegged_in_the_same_step() {
 }
 
 #[test]
-fn explore_sketch_plane_mapping() {
-    for plane in ["XZ", "YZ", "XY"] {
+fn a_sketch_plane_offset_runs_along_its_normal() {
+    // XZ offsets along +y, YZ along +x, XY along +z, and the sketch's own axes are as `to_sketch` says.
+    for (plane, axis) in [("XZ", 1usize), ("YZ", 0), ("XY", 2)] {
         let mut s = Session::default();
-        run(&mut s, "sketch.create", json!({"plane": plane, "name": "P"}));
+        run(&mut s, "sketch.create", json!({"plane": plane, "offset": 10, "name": "P"}));
         run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0], [40, 10], [0, 10], [0, 0]]}));
         run(&mut s, "sketch.finish", json!({}));
         run(&mut s, "solid.extrude", json!({"distance": 6, "direction": "symmetric", "body_name": "T"}));
         let st = s.world_state();
         let b = st.bodies.iter().fold(solidcraft_geom::Aabb3::EMPTY, |a, b| a.union(&b.mesh().bounds()));
-        println!("PLANE {plane}: min {:?} max {:?}", (b.min.x, b.min.y, b.min.z), (b.max.x, b.max.y, b.max.z));
+        let (lo, hi) = ([b.min.x, b.min.y, b.min.z], [b.max.x, b.max.y, b.max.z]);
+        let c = (lo[axis] + hi[axis]) / 2.0;
+        assert!((c - 10.0).abs() < 1e-6, "{plane}: centre {c} {lo:?} {hi:?}");
     }
+}
+
+/// Volume of the body of a component named `name`.
+fn volume_of(s: &mut Session, name: &str) -> f64 {
+    let r = run(s, "inspect.center_of_mass", json!({"bodies": [name]}));
+    r["volume"].as_f64().unwrap_or(0.0)
+}
+
+fn pied_and_traverse(s: &mut Session) {
+    run(s, "scout.piece.traverse", json!({"name": "Pied", "diameter": 100, "length": 800, "at": [0, 0, 0], "dir": [0, 0, 1]}));
+    run(s, "scout.piece.traverse", json!({"name": "Traverse", "diameter": 60, "length": 600, "at": [0, 0, 500], "dir": [1, 0, 0]}));
+}
+
+#[test]
+fn every_tenon_fits_its_mortise_without_touching_it() {
+    for kind in ["hache", "scie", "plat", "platscie", "aronde1", "aronde2", "aronde3"] {
+        let mut s = Session::default();
+        pied_and_traverse(&mut s);
+        let (v_pied, v_trav) = (volume_of(&mut s, "Pied"), volume_of(&mut s, "Traverse"));
+        run(&mut s, "scout.assemblage", json!({"kind": kind, "a": "Traverse", "b": "Pied"}));
+        let (w_pied, w_trav) = (volume_of(&mut s, "Pied"), volume_of(&mut s, "Traverse"));
+        assert!(w_pied < v_pied - 500.0, "{kind}: the mortise took nothing ({v_pied} → {w_pied})");
+        assert!(w_trav > 0.0 && w_trav < v_trav, "{kind}: {v_trav} → {w_trav}");
+        // the joint is exact: the tenon sits in its mortise with a little play and no overlap
+        let r = run(&mut s, "inspect.interference", json!({}));
+        let overlap: f64 = r["interferences"].as_array().map(|a| a.iter().map(|x| x["volume"].as_f64().unwrap_or(0.0)).sum()).unwrap_or(0.0);
+        assert!(overlap < 1.0, "{kind}: the tenon overlaps its mortise by {overlap} mm³ {r}");
+    }
+}
+
+#[test]
+fn a_dovetail_flares_towards_its_tip() {
+    let mut s = Session::default();
+    pied_and_traverse(&mut s);
+    run(&mut s, "scout.assemblage", json!({"kind": "aronde1", "a": "Traverse", "b": "Pied", "w": 30, "theta": 15}));
+    let rec = s.doc.components.iter().find(|c| c.name == "Traverse").and_then(|c| c.properties.get("scout_pole")).cloned().unwrap_or_default();
+    assert!(rec.contains("Aronde") && rec.contains("\"theta\":15"), "{rec}");
+    // the tenon is wider at its tip than at its shoulder: the traverse's bounding box in the wide
+    // direction (here z) is the pole's 60 mm, so look at the mortise: it is a groove across the pied
+    let size = size_of(&s, "Traverse");
+    assert!(size[0] > 500.0, "{size:?}");
+}
+
+#[test]
+fn a_tenon_does_not_come_through_a_split_log() {
+    // a leg tenoned into the round side of a split log stays inside it
+    let mut s = Session::default();
+    run(&mut s, "scout.piece.traverse", json!({"name": "Rondin", "diameter": 200, "length": 1000, "at": [0, 100, 450], "dir": [1, 0, 0]}));
+    run(&mut s, "scout.faconner.demi", json!({"piece": "Rondin"}));
+    run(&mut s, "scout.piece.traverse", json!({"name": "Pied", "diameter": 80, "length": 450, "at": [500, 150, 0], "dir": [0, 0, 1]}));
+    run(&mut s, "scout.assemblage.tenon", json!({"a": "Pied", "b": "Rondin"}));
+    let top = size_of(&s, "Rondin");
+    let pied = size_of(&s, "Pied");
+    assert!(top[2] <= 101.0, "the log's flat face is intact: {top:?}");
+    assert!(pied[2] < 450.0 + 1.0, "{pied:?}");
+    let all = run(&mut s, "inspect.interference", json!({}));
+    assert!(all["interferences"].as_array().is_none_or(Vec::is_empty), "{all}");
 }
