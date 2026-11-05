@@ -108,6 +108,9 @@ pub enum Op {
     Split { mode: SplitMode },
     /// Cut everything beyond local z = `at` at that end.
     CutOff { end: End, at: f64 },
+    /// The end `end` is cut to fit the round pole `with` (`#n`: the pole of index n of the part, or the
+    /// component's name): the pole is built `extra` mm longer and the other pole's body is cut from it.
+    Saddle { with: String, end: End, extra: f64 },
     /// A sharpened end: the last `len` mm taper to a point.
     Point { end: End, len: f64 },
 }
@@ -175,6 +178,20 @@ impl Pole {
     }
     pub fn end(&self) -> V3 {
         add(self.origin, mul(self.dir, self.start + self.length))
+    }
+    /// The local z range the body is built over: the visible part, longer at an end that is cut to fit
+    /// another pole.
+    pub fn built_range(&self) -> (f64, f64) {
+        let (mut z0, mut z1) = (self.start, self.start + self.length);
+        for o in &self.ops {
+            if let Op::Saddle { end, extra, .. } = o {
+                match end {
+                    End::Start => z0 -= extra,
+                    End::End => z1 += extra,
+                }
+            }
+        }
+        (z0, z1)
     }
     pub fn tenon_total(&self) -> f64 {
         self.ops.iter().map(|o| if let Op::Tenon { len, .. } = o { *len } else { 0.0 }).sum()
@@ -343,6 +360,13 @@ impl Build {
         let wide = if aronde && o.typ == 3 { 1 - near } else { near };
         let typ = if aronde { o.typ.clamp(1, 3) } else { 1 };
         self.poles[t].push(Op::Tenon { end, style: o.style, d, w, len: tlen, wide, theta, typ })?;
+        if pr.width == 0.0 && ptn.width == 0.0 {
+            // the end of `t` is cut to the curve of `r`, so the two meet without a gap or an overlap
+            let rt = ptn.radius();
+            let far = (r_in * r_in - (off.abs() + rt).powi(2)).max(0.0).sqrt();
+            let extra = ((r_in - far) / sin + 2.0).min(chord * 0.9);
+            self.poles[t].push(Op::Saddle { with: format!("#{r}"), end, extra })?;
+        }
         // The mortise: on `t`'s line, from just outside the surface of `r`.
         let base = sub(entry, mul(u_world, 3.0));
         let depth = if through { chord + 10.0 } else { tlen + JEU + 3.0 };

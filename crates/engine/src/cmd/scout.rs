@@ -209,6 +209,12 @@ fn combine(s: &mut Session, name: &str, tool: &str, operation: &str) -> Result<(
     Ok(())
 }
 
+/// The same, but the tool is another pole's body and stays.
+fn combine_keep(s: &mut Session, name: &str, tool: &str, operation: &str) -> Result<()> {
+    run(s, "solid.combine", json!({"target": name, "tools": [tool], "operation": operation, "keep_tools": true}))?;
+    Ok(())
+}
+
 /// A point or a direction of the pole's own frame, as the commands take it: in the world, with the
 /// placement of the component being edited (a component placed since it was built reads the numbers
 /// of the features it is given in the world, and keeps the boxes aligned with its own axes).
@@ -371,6 +377,13 @@ fn apply_op(s: &mut Session, name: &str, pole: &Pole, op: &Op) -> Result<()> {
             tool_box(s, &tool, [0.0, 0.0, zc], [big, big, hz])?;
             combine(s, name, &tool, "cut")?;
         }
+        Op::Saddle { with, .. } => {
+            // the end of this pole is cut to the other pole's body (a wolf's mouth): the joint has
+            // neither a gap nor an overlap
+            if !with.starts_with('#') {
+                combine_keep(s, name, with, "cut")?;
+            }
+        }
         Op::Point { end, len } => {
             let r = pole.radius();
             let (at, sgn) = if *end == End::Start { (pole.start + len, -1.0) } else { (pole.start + pole.length - len, 1.0) };
@@ -380,7 +393,7 @@ fn apply_op(s: &mut Session, name: &str, pole: &Pole, op: &Op) -> Result<()> {
             combine(s, name, &tool, "cut")?;
             let cone = tool_name(name);
             let (cb, ca) = (world_point(s, [0.0, 0.0, at - sgn]), world_dir(s, [0.0, 0.0, sgn]));
-            run(s, "solid.cone", json!({"base": cb, "axis": ca, "radius": r, "height": *len + 1.0, "body_name": cone}))?;
+            run(s, "solid.cone", json!({"base": cb, "axis": ca, "radius": r * 0.995, "height": *len + 1.0, "body_name": cone}))?;
             combine(s, name, &cone, "join")?;
         }
     }
@@ -396,18 +409,43 @@ fn dominant(v: V3) -> usize {
 fn make_pole(s: &mut Session, parent: u64, kind: &str, name: &str, pole: &Pole) -> Result<(u64, u64)> {
     let c = run(s, "component.create", json!({"name": name, "parent": parent, "grounded": false}))?;
     let (comp, occ) = (id_of(&c, "component"), id_of(&c, "occurrence"));
+    let (z0, z1) = pole.built_range();
     if pole.width > 0.0 {
-        run(s, "solid.box", json!({"corner": [-pole.diameter / 2.0, -pole.width / 2.0, pole.start], "length": pole.diameter, "width": pole.width, "height": pole.length, "body_name": name}))?;
+        run(s, "solid.box", json!({"corner": [-pole.diameter / 2.0, -pole.width / 2.0, z0], "length": pole.diameter, "width": pole.width, "height": z1 - z0, "body_name": name}))?;
     } else {
-        run(s, "solid.cylinder", json!({"base": [0.0, 0.0, pole.start], "axis": [0.0, 0.0, 1.0], "diameter": pole.diameter, "height": pole.length, "body_name": name}))?;
+        run(s, "solid.cylinder", json!({"base": [0.0, 0.0, z0], "axis": [0.0, 0.0, 1.0], "diameter": pole.diameter, "height": z1 - z0, "body_name": name}))?;
     }
-    for op in &pole.ops {
+    for op in pole.ops.iter().filter(|o| !matches!(o, Op::Saddle { .. })) {
         apply_op(s, name, pole, op)?;
     }
     run(s, "occurrence.move", json!({"occurrence": occ, "matrix": pole.matrix(), "capture": true, "move_grounded": true}))?;
     save_pole(s, comp, kind, pole)?;
     run(s, "component.activate", json!({"component": parent}))?;
     Ok((comp, occ))
+}
+
+/// Once every pole of a part exists: each end cut to fit another pole is cut to it (`#n` names the
+/// pole of index n), and the records are saved with the real names.
+fn fit_saddles(s: &mut Session, kind: &str, comps: &[(u64, String)], poles: &mut [Pole]) -> Result<()> {
+    for i in 0..poles.len() {
+        let mut changed = false;
+        for k in 0..poles[i].ops.len() {
+            let Op::Saddle { with, end, extra } = poles[i].ops[k].clone() else { continue };
+            let Some(j) = with.strip_prefix('#').and_then(|n| n.parse::<usize>().ok()) else { continue };
+            let Some((_, target)) = comps.get(j) else { continue };
+            let Some((comp, name)) = comps.get(i) else { continue };
+            run(s, "component.activate", json!({"component": *comp}))?;
+            combine_keep(s, name, target, "cut")?;
+            poles[i].ops[k] = Op::Saddle { with: target.clone(), end, extra };
+            changed = true;
+        }
+        if changed && let Some((comp, _)) = comps.get(i) {
+            let parent = s.doc.components.iter().find(|c| c.id == *comp).map_or(0, |c| c.parent);
+            run(s, "component.activate", json!({"component": parent}))?;
+            save_pole(s, *comp, kind, &poles[i])?;
+        }
+    }
+    Ok(())
 }
 
 fn save_pole(s: &mut Session, comp: u64, kind: &str, pole: &Pole) -> Result<()> {
@@ -474,12 +512,16 @@ fn create_meuble(s: &mut Session, p: &Value) -> Result<Value> {
     let top = run(s, "component.create", json!({"name": name, "parent": coin.unwrap_or(0), "grounded": false}))?;
     let (comp, occ) = (id_of(&top, "component"), id_of(&top, "occurrence"));
     let mut counts = std::collections::BTreeMap::<String, usize>::new();
+    let mut poles = poles;
+    let mut comps: Vec<(u64, String)> = Vec::new();
     for pole in &poles {
         let n = counts.entry(pole.role.clone()).or_insert(0);
         *n += 1;
         let part = format!("{} {} {}", pole.role, n, name);
-        make_pole(s, comp, &kind, &part, pole)?;
+        let (pc, _) = make_pole(s, comp, &kind, &part, pole)?;
+        comps.push((pc, part));
     }
+    fit_saddles(s, &kind, &comps, &mut poles)?;
     let (x, y) = at.map_or((0.0, 0.0), |v| (v.x, v.y));
     run(
         s,
@@ -536,10 +578,11 @@ fn create_coin(s: &mut Session, p: &Value) -> Result<Value> {
 /// operations added since.
 fn new_ops(old: &Pole, new: &Pole) -> Vec<Op> {
     let mut v = Vec::new();
-    if new.start > old.start + 1e-6 {
+    let saddled = |e: End| new.ops.iter().skip(old.ops.len()).any(|o| matches!(o, Op::Saddle { end, .. } if *end == e));
+    if new.start > old.start + 1e-6 && !saddled(End::Start) {
         v.push(Op::CutOff { end: End::Start, at: new.start });
     }
-    if new.start + new.length < old.start + old.length - 1e-6 {
+    if new.start + new.length < old.start + old.length - 1e-6 && !saddled(End::End) {
         v.push(Op::CutOff { end: End::End, at: new.start + new.length });
     }
     v.extend(new.ops.iter().skip(old.ops.len()).cloned());
@@ -615,8 +658,21 @@ fn assemblage(s: &mut Session, p: &Value) -> Result<Value> {
         },
     };
     result.map_err(|m| bad(cmd, m))?;
-    let mut changed = update_pole(s, ia, &oa, &build.poles[0])?;
-    changed += update_pole(s, ib, &ob, &build.poles[1])?;
+    // `#1` and `#0` in a saddle name the two poles of the joint
+    let names = [name_of(s, ia), name_of(s, ib)];
+    for pole in &mut build.poles[..2] {
+        for op in &mut pole.ops {
+            if let Op::Saddle { with, .. } = op
+                && let Some(k) = with.strip_prefix('#').and_then(|n| n.parse::<usize>().ok())
+                && let Some(n) = names.get(k)
+            {
+                *with = n.clone();
+            }
+        }
+    }
+    // the receiving pole first: its mortise must exist before the other pole is cut to fit it
+    let mut changed = update_pole(s, ib, &ob, &build.poles[1])?;
+    changed += update_pole(s, ia, &oa, &build.poles[0])?;
     let mut created = Vec::new();
     for extra in build.poles.iter().skip(2) {
         created.push(add_pole(s, ia, extra)?);
