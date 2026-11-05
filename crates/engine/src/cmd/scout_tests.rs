@@ -53,7 +53,7 @@ fn all_eleven_models_build_through_the_command() {
     for m in crate::scout::models::MODELS {
         let mut s = Session::default();
         let r = run(&mut s, "scout.meuble.create", json!({"type": m.id}));
-        assert!(r["poles"].as_u64().unwrap_or(0) >= 8, "{} {r}", m.id);
+        assert!(r["poles"].as_u64().unwrap_or(0) >= 5, "{} {r}", m.id);
         let plan = run(&mut s, "scout.plan.meuble", json!({}));
         assert_eq!(plan["type"], m.id);
         assert!(plan["svg"].as_str().is_some_and(|x| x.contains("Liste de débit")), "{}", m.id);

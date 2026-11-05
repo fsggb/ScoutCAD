@@ -164,7 +164,7 @@ impl Pole {
     /// The row-major 3×4 matrix that turns a pole built along local +z into this one.
     pub fn matrix(&self) -> [f64; 12] {
         let (x, y, z, o) = (self.x_axis(), self.y_axis(), self.dir, self.origin);
-        [x[0], y[0], z[0], o[0], x[1], y[1], z[1], o[1], x[2], y[2], z[2], o[2]].map(|v| (v * 1e6).round() / 1e6)
+        [x[0], y[0], z[0], o[0], x[1], y[1], z[1], o[1], x[2], y[2], z[2], o[2]]
     }
     pub fn p_start(&self) -> V3 {
         add(self.origin, mul(self.dir, self.start))

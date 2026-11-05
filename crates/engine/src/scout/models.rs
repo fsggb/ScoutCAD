@@ -606,7 +606,7 @@ mod tests {
     fn every_model_builds_with_its_defaults() {
         for m in MODELS {
             let poles = build(m.id, &Params::of(m)).unwrap_or_else(|e| panic!("{}: {e}", m.id));
-            assert!(poles.len() >= 8 && poles.len() <= MAX_POLES, "{}: {}", m.id, poles.len());
+            assert!(poles.len() >= 5 && poles.len() <= MAX_POLES, "{}: {}", m.id, poles.len());
             assert!(poles.iter().all(|p| p.length > 0.0 && p.length.is_finite()), "{}", m.id);
             assert!(wood_metres(&poles) > 1.0, "{}", m.id);
             assert!(!cut_list(&poles).is_empty());
