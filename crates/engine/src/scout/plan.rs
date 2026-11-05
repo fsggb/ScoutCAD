@@ -78,7 +78,7 @@ pub fn meuble_section(title: &str, kind: &str, author: &str, poles: &[Pole]) -> 
     let mut o = String::new();
     let _ = writeln!(o, "<section class=\"meuble\"><h2>{}</h2><p class=\"sub\">{} · {} m de bois</p>", esc(title), esc(kind), mm(wood_metres(poles)));
     o.push_str(&iso_svg(poles));
-    o.push_str("<table><tr><th>Qté</th><th>Pièce</th><th>Ø mm</th><th>Visible</th><th>À débiter</th></tr>");
+    o.push_str("<h3>Liste de débit</h3><table><tr><th>Qté</th><th>Pièce</th><th>Ø mm</th><th>Visible</th><th>À débiter</th></tr>");
     for r in cut_list(poles) {
         let section = if r.width > 0.0 { format!("{}×{}", mm(r.diameter), mm(r.width)) } else { mm(r.diameter) };
         let _ = write!(o, "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>", r.count, esc(&r.role), section, mm(r.length), mm(r.cut_length));
