@@ -259,10 +259,33 @@ fn frame(b: &mut Build, ten: TenonOpts, asm: Asm, (x0, x1, y0, y1): (f64, f64, f
             }
             // the legs' tenons rise through both poles of each corner
             for (leg, l) in [(legs[0], l0), (legs[1], l0), (legs[2], l1), (legs[3], l1)] {
-                b.tenon(leg, l, ten.through())?;
+                if b.poles[leg].end()[2] > z + 1.0 {
+                    // a post that goes on above the frame: the lisse and its traverse pass through it
+                    let t = if l == l0 { [t0, t1] } else { [t0, t1] };
+                    b.through(l, leg)?;
+                    for tr in t {
+                        if closest_near(b, tr, leg) {
+                            b.through(tr, leg)?;
+                        }
+                    }
+                } else {
+                    b.tenon(leg, l, ten.through())?;
+                }
             }
             Ok(Frame { lisses: [l0, l1], traverses: [t0, t1] })
         }
+    }
+}
+
+/// Whether pole `a`'s line passes within a pole's reach of pole `b` (they meet).
+fn closest_near(b: &Build, a: usize, c: usize) -> bool {
+    let (pa, pc) = (&b.poles[a], &b.poles[c]);
+    match crate::scout::pole::closest(pa.origin, pa.dir, pc.origin, pc.dir) {
+        Some((x, y, ta, _)) => {
+            let d = crate::scout::pole::sub(x, y);
+            crate::scout::pole::len(d) < pc.radius() && ta >= pa.start - pc.radius() && ta <= pa.start + pa.length + pc.radius()
+        }
+        None => false,
     }
 }
 
