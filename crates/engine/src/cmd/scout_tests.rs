@@ -315,3 +315,18 @@ fn a_tenon_does_not_come_through_a_split_log() {
     let all = run(&mut s, "inspect.interference", json!({}));
     assert!(all["interferences"].as_array().is_none_or(Vec::is_empty), "{all}");
 }
+
+#[test]
+fn debug_volumes_and_split() {
+    let mut s = Session::default();
+    pied_and_traverse(&mut s);
+    println!("DBG com {}", run(&mut s, "inspect.center_of_mass", json!({})));
+    println!("DBG com Pied {}", run(&mut s, "inspect.center_of_mass", json!({"bodies": ["Pied"]})));
+    run(&mut s, "scout.piece.traverse", json!({"name": "Rondin", "diameter": 200, "length": 1000, "at": [3000, 100, 450], "dir": [1, 0, 0]}));
+    println!("DBG rondin before {:?}", size_of(&s, "Rondin"));
+    run(&mut s, "scout.faconner.demi", json!({"piece": "Rondin"}));
+    println!("DBG rondin after {:?}", size_of(&s, "Rondin"));
+    let bodies: Vec<String> = s.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+    println!("DBG bodies {bodies:?}");
+    println!("DBG rec {:?}", s.doc.components.iter().find(|c| c.name == "Rondin").and_then(|c| c.properties.get("scout_pole")));
+}
