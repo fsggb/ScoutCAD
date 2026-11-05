@@ -27,13 +27,6 @@ const SAMPLE_PICTURES: [&[u8]; 11] = [
     include_bytes!("../../../assets/samples/exports/8.png"),
     include_bytes!("../../../assets/samples/exports/9.png"),
     include_bytes!("../../../assets/samples/exports/10.png"),
-]; 6] = [
-    include_bytes!("../../../assets/samples/exports/0.png"),
-    include_bytes!("../../../assets/samples/exports/1.png"),
-    include_bytes!("../../../assets/samples/exports/2.png"),
-    include_bytes!("../../../assets/samples/exports/3.png"),
-    include_bytes!("../../../assets/samples/exports/4.png"),
-    include_bytes!("../../../assets/samples/exports/5.png"),
 ];
 
 /// What a background job makes: a key ("sample:N" or a path), the picture, and for samples the
