@@ -241,3 +241,17 @@ fn a_half_lap_can_be_pegged_in_the_same_step() {
     let r = run(&mut s, "scout.assemblage.mibois", json!({"a": "A", "b": "B", "chev": true, "d": 20}));
     assert_eq!(r["created"].as_array().map(Vec::len), Some(1), "{r}");
 }
+
+#[test]
+fn explore_sketch_plane_mapping() {
+    for plane in ["XZ", "YZ", "XY"] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": plane, "name": "P"}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0], [40, 10], [0, 10], [0, 0]]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 6, "direction": "symmetric", "body_name": "T"}));
+        let st = s.world_state();
+        let b = st.bodies.iter().fold(solidcraft_geom::Aabb3::EMPTY, |a, b| a.union(&b.mesh().bounds()));
+        println!("PLANE {plane}: min {:?} max {:?}", (b.min.x, b.min.y, b.min.z), (b.max.x, b.max.y, b.max.z));
+    }
+}
