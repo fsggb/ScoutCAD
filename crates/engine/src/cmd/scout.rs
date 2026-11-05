@@ -685,6 +685,9 @@ fn faconner(s: &mut Session, p: &Value) -> Result<Value> {
     let kind = str_(p, "kind").ok_or_else(|| bad(cmd, "`kind` is required (demi, quart, couper, pointe)"))?;
     let (id, old) = piece(s, p, "piece", cmd)?;
     let mut new = old.clone();
+    if matches!(kind, "demi" | "quart") && old.ops.iter().any(|o| matches!(o, Op::Split { .. })) {
+        return Err(bad(cmd, format!("« {} » est déjà fendue", name_of(s, id))));
+    }
     match kind {
         "demi" => new.push(Op::Split { mode: SplitMode::Demi }),
         "quart" => new.push(Op::Split { mode: SplitMode::Quart }),

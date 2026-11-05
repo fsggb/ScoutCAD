@@ -128,7 +128,10 @@ fn a_pole_is_split_cut_and_sharpened() {
     let r = run(&mut s, "scout.faconner", json!({"kind": "couper", "piece": "Rondin", "length": 800}));
     assert_eq!(r["length"].as_f64(), Some(800.0));
     run(&mut s, "scout.faconner", json!({"kind": "pointe", "piece": "Rondin", "len": 200}));
-    run(&mut s, "scout.faconner", json!({"kind": "quart", "piece": "Rondin"}));
+    // a pole is split once
+    assert!(s.execute("scout.faconner", &json!({"kind": "quart", "piece": "Rondin"})).is_err());
+    run(&mut s, "scout.piece.traverse", json!({"name": "Autre", "diameter": 150, "length": 1000, "at": [0, 500, 75]}));
+    run(&mut s, "scout.faconner", json!({"kind": "quart", "piece": "Autre"}));
     assert!(s.execute("scout.faconner", &json!({"kind": "couper", "piece": "Rondin", "length": 5000})).is_err());
     assert!(s.execute("scout.faconner", &json!({"kind": "pointe", "piece": "Rondin", "len": 9000})).is_err());
     assert!(s.execute("scout.faconner", &json!({"kind": "zzz", "piece": "Rondin"})).is_err());
