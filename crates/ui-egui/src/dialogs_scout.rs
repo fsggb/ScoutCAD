@@ -53,8 +53,7 @@ pub enum Which {
     Faconner,
     Traverse,
     Equerre,
-    Claies,
-    Filet,
+    Plateau,
     Coin,
     Profil,
 }
@@ -94,8 +93,7 @@ impl Sc {
         let (a, b, c) = match which {
             Which::Traverse => ("80".into(), "1500".into(), String::new()),
             Which::Equerre => ("300".into(), "50".into(), String::new()),
-            Which::Claies => ("1000".into(), "600".into(), "20".into()),
-            Which::Filet => ("1000".into(), "600".into(), "30".into()),
+            Which::Plateau => ("1000".into(), "600".into(), "20".into()),
             Which::Profil => ("40".into(), "3".into(), "1000".into()),
             _ => (String::new(), String::new(), String::new()),
         };
@@ -111,10 +109,10 @@ impl Sc {
             through: false,
             invert: false,
             chev: false,
-            pc: "50".into(),
-            d: String::new(),
+            pc: if which == Which::Plateau { "0".into() } else { "50".into() },
+            d: if which == Which::Plateau { "30".into() } else { String::new() },
             turns: "6".into(),
-            length: "500".into(),
+            length: if which == Which::Plateau { "0".into() } else { "500".into() },
             end: 1,
             a,
             b,
@@ -144,8 +142,7 @@ pub fn start(_app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "scout.coin.create" => (Sc::new(Which::Coin, 0), Vec::new()),
         "scout.piece.traverse" => (Sc::new(Which::Traverse, 0), Vec::new()),
         "scout.piece.equerre" => (Sc::new(Which::Equerre, 0), Vec::new()),
-        "scout.piece.claies" => (Sc::new(Which::Claies, 0), Vec::new()),
-        "scout.piece.filet" => (Sc::new(Which::Filet, 0), Vec::new()),
+        "scout.plateau" => (Sc::new(Which::Plateau, 0), Vec::new()),
         "scout.profil.tube_rond" => (Sc::new(Which::Profil, 0), Vec::new()),
         "scout.profil.tube_carre" => (Sc::new(Which::Profil, 1), Vec::new()),
         "scout.profil.corniere" => (Sc::new(Which::Profil, 2), Vec::new()),
@@ -180,8 +177,7 @@ pub fn title(k: &Sc) -> &'static str {
         Which::Faconner => "FAÇONNER",
         Which::Traverse => "TRAVERSE",
         Which::Equerre => "ÉQUERRE",
-        Which::Claies => "PLATEAU DE CLAIES",
-        Which::Filet => "FILET DE FICELLE",
+        Which::Plateau => "PLATEAU",
         Which::Coin => "COIN DE PATROUILLE",
         Which::Profil => "PROFILÉ MÉTAL",
     }
@@ -194,8 +190,7 @@ pub fn command_id(k: &Sc) -> &'static str {
         Which::Faconner => "scout.faconner",
         Which::Traverse => "scout.piece.traverse",
         Which::Equerre => "scout.piece.equerre",
-        Which::Claies => "scout.piece.claies",
-        Which::Filet => "scout.piece.filet",
+        Which::Plateau => "scout.plateau",
         Which::Coin => "scout.coin.create",
         Which::Profil => "scout.profil",
     }
@@ -301,15 +296,17 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Sc) -> bool {
             text_row(ui, "Unité du 3-4-5 (mm)", &mut k.a, "");
             text_row(ui, "Diamètre des perches (mm)", &mut k.b, "");
         }
-        Which::Claies => {
+        Which::Plateau => {
+            choice_row(ui, "Forme du plateau", "sc_pl", &mut k.kind, &["Claies tressées (sous, sur, sous)", "Claies droites", "Filet de ficelle", "Quarts de bois jointifs"]);
             text_row(ui, "Longueur (mm)", &mut k.a, "");
-            text_row(ui, "Largeur (mm)", &mut k.b, "");
-            text_row(ui, "Diamètre des claies (mm)", &mut k.c, "");
-        }
-        Which::Filet => {
-            text_row(ui, "Longueur (mm)", &mut k.a, "");
-            text_row(ui, "Largeur (mm)", &mut k.b, "");
-            text_row(ui, "Maille (mm)", &mut k.c, "");
+            text_row(ui, "Largeur entre les lisses (mm)", &mut k.b, "");
+            if k.kind == 2 {
+                text_row(ui, "Maille du filet (mm)", &mut k.d, "");
+            } else {
+                text_row(ui, "Diamètre des claies (mm)", &mut k.c, "");
+            }
+            text_row(ui, "Début du clayage (mm)", &mut k.pc, "");
+            text_row(ui, "Longueur clayée (mm, 0 = tout)", &mut k.length, "");
         }
         Which::Profil => {
             let kinds = ["Tube rond", "Tube carré", "Cornière", "Profilé en U", "Poutre en I"];
@@ -390,8 +387,11 @@ pub fn commands(k: &Sc, inputs: &[SelInput]) -> Result<Vec<(String, Value)>, Str
             json!({"diameter": d, "length": number("Longueur", &k.b)?, "dir": dir, "at": [number("Position X", &k.x)?, number("Position Y", &k.y)?, d / 2.0]})
         }
         Which::Equerre => json!({"unit": number("Unité", &k.a)?, "d": number("Diamètre", &k.b)?}),
-        Which::Claies => json!({"long": number("Longueur", &k.a)?, "larg": number("Largeur", &k.b)?, "dc": number("Diamètre", &k.c)?}),
-        Which::Filet => json!({"long": number("Longueur", &k.a)?, "larg": number("Largeur", &k.b)?, "maille": number("Maille", &k.c)?}),
+        Which::Plateau => {
+            let mode = ["tresse", "droit", "filet", "quarts"].get(k.kind).copied().unwrap_or("tresse");
+            let maille = if k.d.trim().is_empty() { 30.0 } else { number("Maille", &k.d)? };
+            json!({"mode": mode, "long": number("Longueur", &k.a)?, "larg": number("Largeur", &k.b)?, "dc": number("Diamètre", &k.c)?, "maille": maille, "c0": number("Début du clayage", &k.pc)?, "cl": number("Longueur clayée", &k.length)?})
+        }
         Which::Profil => {
             let kinds = ["tube_rond", "tube_carre", "corniere", "u", "i"];
             let dir = ["X", "Y", "Z"].get(k.dir).copied().unwrap_or("X");
@@ -416,7 +416,7 @@ mod tests {
             let mut s = solidcraft_engine::Session::default();
             assert!(s.execute(&c[0].0, &c[0].1).is_ok(), "{}", c[0].1);
         }
-        for which in [Which::Traverse, Which::Equerre, Which::Claies, Which::Filet, Which::Coin, Which::Profil] {
+        for which in [Which::Traverse, Which::Equerre, Which::Plateau, Which::Coin, Which::Profil] {
             let c = commands(&Sc::new(which, 0), &[]).unwrap_or_default();
             let mut s = solidcraft_engine::Session::default();
             assert!(s.execute(&c[0].0, &c[0].1).is_ok(), "{:?}: {}", which, c[0].1);

@@ -68,14 +68,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SCOUT", "PIÈCES")
         .icon("scout_equerre")
         .params("unit?: mm for the 3-4-5 (default 300: poles of 0.9, 1.2 and 1.5 m); d?: pole Ø mm (default 50); at?: [x, y]"),
-    CommandSpec::new("scout.piece.claies", "Plateau de claies", |s, p| atomic(s, |c| piece_claies(c, p)))
+    CommandSpec::new("scout.plateau", "Plateau", |s, p| atomic(s, |c| piece_plateau(c, p)))
         .at("SCOUT", "PIÈCES")
         .icon("scout_claies")
-        .params("long?, larg?: mm (default 1000 × 600); dc?: claie Ø mm (default 20); z?: height of the bottom mm; at?: [x, y]"),
-    CommandSpec::new("scout.piece.filet", "Filet de ficelle", |s, p| atomic(s, |c| piece_filet(c, p)))
-        .at("SCOUT", "PIÈCES")
-        .icon("scout_filet")
-        .params("long?, larg?: mm (default 1000 × 600); maille?: mm (default 30); z?: height mm; at?: [x, y]"),
+        .params("mode?: tresse|droit|filet|quarts (default tresse); long?, larg?: mm (default 1000 × 600); dc?: claie Ø mm (20); dr?: rail Ø mm (40); maille?: mm (30); c0?: start of the claying mm; cl?: claied length mm (0 = to the end); z?: height of the bottom mm; at?: [x, y]"),
     CommandSpec::new("scout.profil.tube_rond", "Tube rond", |s, p| atomic(s, |c| piece_profil(c, &with_kind(p, "tube_rond")))).icon("cylinder").params("see scout.profil"),
     CommandSpec::new("scout.profil.tube_carre", "Tube carré", |s, p| atomic(s, |c| piece_profil(c, &with_kind(p, "tube_carre")))).icon("box").params("see scout.profil"),
     CommandSpec::new("scout.profil.corniere", "Cornière", |s, p| atomic(s, |c| piece_profil(c, &with_kind(p, "corniere")))).icon("box").params("see scout.profil"),
@@ -791,39 +787,30 @@ fn piece_equerre(s: &mut Session, p: &Value) -> Result<Value> {
     loose(s, "Équerre", "EQUERRE", &b.poles, None)
 }
 
-fn piece_claies(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "scout.piece.claies";
+/// A plateau: two rails along x and the fill between them, in one of CathIA's forms.
+fn piece_plateau(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "scout.plateau";
+    let mode = match str_(p, "mode") {
+        None => models::Fill::Tresse,
+        Some(k) => models::Fill::from_key(k).ok_or_else(|| bad(cmd, "`mode` is tresse, droit, filet or quarts"))?,
+    };
     let (l, w) = (bounded(cmd, p, "long", 1000.0, 100.0, 5000.0)?, bounded(cmd, p, "larg", 600.0, 100.0, 5000.0)?);
-    let dc = bounded(cmd, p, "dc", 20.0, 8.0, 80.0)?;
+    let o = models::FillOpts {
+        dc: bounded(cmd, p, "dc", 20.0, 8.0, 80.0)?,
+        maille: bounded(cmd, p, "maille", 30.0, 10.0, 300.0)?.max((l + w) / 160.0),
+        rail: bounded(cmd, p, "dr", 40.0, 20.0, 150.0)?,
+        c0: bounded(cmd, p, "c0", 0.0, 0.0, 4900.0)?,
+        cl: bounded(cmd, p, "cl", 0.0, 0.0, 5000.0)?,
+    };
     let z = bounded(cmd, p, "z", 0.0, 0.0, 3000.0)?;
     let at = at_of(cmd, p)?.unwrap_or([0.0; 3]);
-    let n = ((l / (dc * 1.4)).floor().clamp(1.0, 150.0)) as usize;
-    let poles: Vec<Pole> = (0..n)
-        .map(|i| {
-            let x = at[0] + l * (i as f64 + 0.5) / n as f64;
-            Pole::bar("claie", dc, [x, at[1], z + dc / 2.0], [x, at[1] + w, z + dc / 2.0])
-        })
-        .collect();
-    loose(s, "Plateau de claies", "CLAIES", &poles, None)
-}
-
-fn piece_filet(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "scout.piece.filet";
-    let (l, w) = (bounded(cmd, p, "long", 1000.0, 100.0, 5000.0)?, bounded(cmd, p, "larg", 600.0, 100.0, 5000.0)?);
-    let maille = bounded(cmd, p, "maille", 30.0, 10.0, 300.0)?.max((l + w) / 160.0);
-    let z = bounded(cmd, p, "z", 0.0, 0.0, 3000.0)?;
-    let at = at_of(cmd, p)?.unwrap_or([0.0; 3]);
-    let (nx, ny) = ((l / maille).floor().max(1.0) as usize, (w / maille).floor().max(1.0) as usize);
-    let mut poles = Vec::new();
-    for i in 0..=nx {
-        let x = at[0] + l * i as f64 / nx as f64;
-        poles.push(Pole::bar("ficelle", 4.0, [x, at[1], z], [x, at[1] + w, z]));
+    let mut b = Build::default();
+    let zr = z + o.rail / 2.0;
+    for y in [at[1], at[1] + w] {
+        b.bar("lisse", o.rail, [at[0], y, zr], [at[0] + l, y, zr]);
     }
-    for j in 0..=ny {
-        let y = at[1] + w * j as f64 / ny as f64;
-        poles.push(Pole::bar("ficelle", 4.0, [at[0], y, z + 4.0], [at[0] + l, y, z + 4.0]));
-    }
-    loose(s, "Filet de ficelle", "FILET", &poles, None)
+    models::fill(&mut b, mode, (at[0], at[0] + l), (at[1], at[1] + w), zr + o.rail / 2.0, o).map_err(|x| bad(cmd, x))?;
+    loose(s, "Plateau", "PLATEAU", &b.poles, None)
 }
 
 // ---- reading back, plans and the HTML page -----------------------------------------------------

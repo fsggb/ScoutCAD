@@ -144,8 +144,8 @@ fn a_pole_is_split_cut_and_sharpened() {
 fn the_other_pieces_of_cathia_exist() {
     let mut s = Session::default();
     assert_eq!(run(&mut s, "scout.piece.equerre", json!({}))["poles"].as_u64().map(|n| n >= 5), Some(true));
-    assert!(run(&mut s, "scout.piece.claies", json!({}))["poles"].as_u64().unwrap_or(0) >= 10);
-    assert!(run(&mut s, "scout.piece.filet", json!({}))["poles"].as_u64().unwrap_or(0) >= 20);
+    assert!(run(&mut s, "scout.plateau", json!({}))["poles"].as_u64().unwrap_or(0) >= 20);
+    assert!(run(&mut s, "scout.plateau", json!({"mode": "filet"}))["poles"].as_u64().unwrap_or(0) >= 20);
 }
 
 #[test]
@@ -183,7 +183,7 @@ fn bad_input_is_refused_not_panicked() {
     assert!(s.execute("scout.assemblage", &json!({"kind": "mibois"})).is_err());
     assert!(s.execute("scout.piece.traverse", &json!({"length": 1e12})).is_err());
     assert!(s.execute("scout.piece.traverse", &json!({"dir": [0, 0, 0]})).is_err());
-    assert!(s.execute("scout.piece.claies", &json!({"long": -1})).is_err());
+    assert!(s.execute("scout.plateau", &json!({"long": -1})).is_err());
 }
 
 #[test]
@@ -352,4 +352,16 @@ fn a_bench_leg_is_one_body_that_stays_inside_the_seat() {
     }
     let all = run(&mut s, "inspect.interference", json!({}));
     assert!(all["interferences"].as_array().is_none_or(Vec::is_empty), "{all}");
+}
+
+/// Prints how long each model takes (`cargo test --profile ci -p solidcraft-engine --lib -- --ignored --nocapture time_each_model`).
+#[test]
+#[ignore]
+fn time_each_model() {
+    for m in crate::scout::models::MODELS {
+        let mut s = Session::default();
+        let t = std::time::Instant::now();
+        let r = run(&mut s, "scout.meuble.create", json!({"type": m.id}));
+        eprintln!("{:<10} {:>6} ms  {} pièces", m.id, t.elapsed().as_millis(), r["poles"]);
+    }
 }
