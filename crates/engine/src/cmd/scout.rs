@@ -23,7 +23,7 @@ use crate::scout::models::{self, MODELS, Params};
 use crate::scout::dessin::{self, Cartouche, Format, Placed, SheetCfg, View};
 use crate::scout::nomenclature;
 use crate::scout::plan::{meuble_section, page_html, steps};
-use crate::scout::pole::{self, Build, End, MAX_POLES, Op, Pole, SplitMode, Style, TenonOpts, V3, cut_list, extent, joint_summary, wood_metres};
+use crate::scout::pole::{self, Build, End, MAX_POLES, Op, Pole, SplitMode, Style, TenonOpts, V3, add, cut_list, extent, joint_summary, mul, wood_metres};
 use crate::{EngineError, Result, Session};
 
 const P_POLE: &str = "scout_pole";
@@ -31,6 +31,15 @@ const P_KIND: &str = "scout_meuble";
 const P_PARAMS: &str = "scout_reglages";
 const P_PLACE: &str = "scout_place";
 const P_COIN: &str = "scout_coin";
+/// On a pole built without its hidden joints (the quick way): how many of its first operations are
+/// still to be cut (see `detail`).
+const P_FAST: &str = "scout_rapide";
+
+/// Joints that cannot be seen from outside (the tenon in its mortise, a peg's hole): the quick way
+/// leaves them out of the geometry and `scout.meuble.detail` cuts them when asked.
+fn hidden(op: &Op) -> bool {
+    matches!(op, Op::Tenon { .. } | Op::Mortise { .. } | Op::Hole { .. } | Op::Saddle { .. })
+}
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("scout.meuble.types", "Modèles de meubles", |_, _| Ok(types())).icon("library").noundo().doc_only().params(
@@ -68,6 +77,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SCOUT", "PIÈCES")
         .icon("scout_equerre")
         .params("unit?: mm for the 3-4-5 (default 300: poles of 0.9, 1.2 and 1.5 m); d?: pole Ø mm (default 50); at?: [x, y]"),
+    CommandSpec::new("scout.meuble.detail", "Détailler les assemblages", |s, p| atomic(s, |c| detail_cmd(c, p)))
+        .at("SCOUT", "MEUBLES")
+        .icon("scout_tenon")
+        .params("meuble?: name or id (default: all); cuts the tenons, mortises and peg holes left out of the furniture built the quick way (slow: seconds per joint)"),
     CommandSpec::new("scout.plateau", "Plateau", |s, p| atomic(s, |c| piece_plateau(c, p)))
         .at("SCOUT", "PIÈCES")
         .icon("scout_claies")
@@ -125,7 +138,22 @@ fn types() -> Value {
 }
 
 fn run(s: &mut Session, id: &str, p: Value) -> Result<Value> {
-    s.execute(id, &p)
+    let t = std::time::Instant::now();
+    let r = s.execute(id, &p);
+    #[cfg(test)]
+    PROFILE.with(|m| {
+        let mut m = m.borrow_mut();
+        let e = m.entry(id.to_string()).or_insert((0, 0));
+        e.0 += 1;
+        e.1 += t.elapsed().as_millis();
+    });
+    let _ = t;
+    r
+}
+
+#[cfg(test)]
+thread_local! {
+    pub static PROFILE: std::cell::RefCell<std::collections::BTreeMap<String, (u32, u128)>> = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
 }
 
 fn id_of(v: &Value, key: &str) -> u64 {
@@ -201,13 +229,21 @@ fn tool_name(name: &str) -> String {
 /// A new body for a tool, then `solid.combine` of it into the pole's body: the interface's own
 /// Boolean, so every tenon, mortise, notch and split is a Combine in the history.
 fn combine(s: &mut Session, name: &str, tool: &str, operation: &str) -> Result<()> {
+    let t = std::time::Instant::now();
     run(s, "solid.combine", json!({"target": name, "tools": [tool], "operation": operation}))?;
+    #[cfg(test)]
+    eprintln!("  combine {operation} {name} <- {tool}: {} ms", t.elapsed().as_millis());
+    let _ = t;
     Ok(())
 }
 
 /// The same, but the tool is another pole's body and stays.
 fn combine_keep(s: &mut Session, name: &str, tool: &str, operation: &str) -> Result<()> {
+    let t = std::time::Instant::now();
     run(s, "solid.combine", json!({"target": name, "tools": [tool], "operation": operation, "keep_tools": true}))?;
+    #[cfg(test)]
+    eprintln!("  combine_keep {operation} {name} <- {tool}: {} ms", t.elapsed().as_millis());
+    let _ = t;
     Ok(())
 }
 
@@ -402,7 +438,7 @@ fn dominant(v: V3) -> usize {
 }
 
 /// Makes the component of one pole under `parent`, builds and places it, saves its record.
-fn make_pole(s: &mut Session, parent: u64, kind: &str, name: &str, pole: &Pole) -> Result<(u64, u64)> {
+fn make_pole(s: &mut Session, parent: u64, kind: &str, name: &str, pole: &Pole, detail: bool) -> Result<(u64, u64)> {
     let c = run(s, "component.create", json!({"name": name, "parent": parent, "grounded": false}))?;
     let (comp, occ) = (id_of(&c, "component"), id_of(&c, "occurrence"));
     let (z0, z1) = pole.built_range();
@@ -411,11 +447,14 @@ fn make_pole(s: &mut Session, parent: u64, kind: &str, name: &str, pole: &Pole) 
     } else {
         run(s, "solid.cylinder", json!({"base": [0.0, 0.0, z0], "axis": [0.0, 0.0, 1.0], "diameter": pole.diameter, "height": z1 - z0, "body_name": name}))?;
     }
-    for op in pole.ops.iter().filter(|o| !matches!(o, Op::Saddle { .. })) {
+    for op in pole.ops.iter().filter(|o| !matches!(o, Op::Saddle { .. }) && (detail || !hidden(o))) {
         apply_op(s, name, pole, op)?;
     }
     run(s, "occurrence.move", json!({"occurrence": occ, "matrix": pole.matrix(), "capture": true, "move_grounded": true}))?;
     save_pole(s, comp, kind, pole)?;
+    if !detail && pole.ops.iter().any(hidden) {
+        run(s, "component.metadata.set", json!({"component": comp, "properties": {P_FAST: pole.ops.len().to_string()}}))?;
+    }
     run(s, "component.activate", json!({"component": parent}))?;
     Ok((comp, occ))
 }
@@ -431,7 +470,22 @@ fn fit_saddles(s: &mut Session, kind: &str, comps: &[(u64, String)], poles: &mut
             let Some((_, target)) = comps.get(j) else { continue };
             let Some((comp, name)) = comps.get(i) else { continue };
             run(s, "component.activate", json!({"component": *comp}))?;
-            combine_keep(s, name, target, "cut")?;
+            let recv = poles[j].clone();
+            if recv.width == 0.0 {
+                // A plain cylinder of the receiving pole is a far lighter cutter than its body (with
+                // all its mortises): cut with it, then put the tenons back, which it also took.
+                let (z0, z1) = recv.built_range();
+                let base = poles[i].local(add(recv.origin, mul(recv.dir, z0)));
+                let axis = poles[i].local_dir(recv.dir);
+                let tool = tool_name(name);
+                tool_cylinder(s, &tool, base, axis, recv.diameter, z1 - z0)?;
+                combine(s, name, &tool, "cut")?;
+                for op in poles[i].ops.clone().iter().filter(|o| matches!(o, Op::Tenon { .. })) {
+                    apply_op(s, name, &poles[i], op)?;
+                }
+            } else {
+                combine_keep(s, name, target, "cut")?;
+            }
             poles[i].ops[k] = Op::Saddle { with: target.clone(), end, extra };
             changed = true;
         }
@@ -503,6 +557,7 @@ fn create_meuble(s: &mut Session, p: &Value) -> Result<Value> {
     let rotation = rotation_of(cmd, p)?;
     let at = p.get("at").map(|v| vec2(v).ok_or_else(|| bad(cmd, "`at` is [x, y] in mm"))).transpose()?;
     let coin = coin_param(s, p, cmd)?;
+    let detail = bool_p(p, "detail", false);
     let name = free_name(s, str_(p, "name").map(str::trim).filter(|n| !n.is_empty()).unwrap_or(m.name));
     let active = s.active_component;
     let top = run(s, "component.create", json!({"name": name, "parent": coin.unwrap_or(0), "grounded": false}))?;
@@ -514,10 +569,12 @@ fn create_meuble(s: &mut Session, p: &Value) -> Result<Value> {
         let n = counts.entry(pole.role.clone()).or_insert(0);
         *n += 1;
         let part = format!("{} {} {}", pole.role, n, name);
-        let (pc, _) = make_pole(s, comp, &kind, &part, pole)?;
+        let (pc, _) = make_pole(s, comp, &kind, &part, pole, detail)?;
         comps.push((pc, part));
     }
-    fit_saddles(s, &kind, &comps, &mut poles)?;
+    if detail {
+        fit_saddles(s, &kind, &comps, &mut poles)?;
+    }
     let (x, y) = at.map_or((0.0, 0.0), |v| (v.x, v.y));
     run(
         s,
@@ -568,6 +625,45 @@ fn create_coin(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"component": coin, "name": name, "meubles": placed}))
 }
 
+/// Cuts the hidden joints (tenons, mortises, peg holes) of the furniture built the quick way.
+fn detail_cmd(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "scout.meuble.detail";
+    let root = if p.get("meuble").is_some_and(|v| !v.is_null()) { Some(component_id(s, &p["meuble"], cmd)?) } else { None };
+    let under = |s: &Session, mut c: u64, root: u64| loop {
+        if c == root {
+            return true;
+        }
+        match s.doc.components.iter().find(|k| k.id == c) {
+            Some(k) if k.parent != c => c = k.parent,
+            _ => return false,
+        }
+    };
+    let todo: Vec<(u64, usize, Pole)> = s
+        .doc
+        .components
+        .iter()
+        .filter(|c| root.is_none_or(|r| under(s, c.id, r)))
+        .filter_map(|c| {
+            let n: usize = c.properties.get(P_FAST)?.parse().ok()?;
+            let pole: Pole = serde_json::from_str(c.properties.get(P_POLE)?).ok()?;
+            Some((c.id, n, pole))
+        })
+        .collect();
+    let active = s.active_component;
+    let mut cuts = 0;
+    for (comp, n, pole) in &todo {
+        let name = name_of(s, *comp);
+        run(s, "component.activate", json!({"component": *comp}))?;
+        for op in pole.ops.iter().take(*n).filter(|o| hidden(o) && !matches!(o, Op::Saddle { .. })) {
+            apply_op(s, &name, pole, op)?;
+            cuts += 1;
+        }
+        run(s, "component.metadata.set", json!({"component": *comp, "properties": {P_FAST: ""}}))?;
+    }
+    run(s, "component.activate", json!({"component": active}))?;
+    Ok(json!({"pieces": todo.len(), "operations": cuts}))
+}
+
 // ---- joints and shaping on poles already in the design ----------------------------------------
 
 /// What changed on a pole between `old` and `new`: the cut that takes off what was trimmed, then the
@@ -605,7 +701,7 @@ fn update_pole(s: &mut Session, comp: u64, old: &Pole, new: &Pole) -> Result<usi
 fn add_pole(s: &mut Session, beside: u64, pole: &Pole) -> Result<String> {
     let parent = s.doc.components.iter().find(|c| c.id == beside).map_or(0, |c| c.parent);
     let name = free_name(s, &format!("{} {}", pole.role, name_of(s, beside)));
-    make_pole(s, parent, "AJOUT", &name, pole)?;
+    make_pole(s, parent, "AJOUT", &name, pole, true)?;
     Ok(name)
 }
 
@@ -643,6 +739,7 @@ fn assemblage(s: &mut Session, p: &Value) -> Result<Value> {
                 o.w = num(p, "w").unwrap_or(0.0);
                 o.theta = num(p, "theta").unwrap_or(if style == Style::Aronde { 20.0 } else { 0.0 });
                 o.through = through || p.get("through").and_then(Value::as_bool).unwrap_or(false);
+                o.saddle = p.get("gueule").and_then(Value::as_bool).unwrap_or(false);
                 o.typ = match other {
                     "aronde2" => 2,
                     "aronde3" => 3,
@@ -722,7 +819,7 @@ fn loose(s: &mut Session, name: &str, kind: &str, poles: &[Pole], at: Option<V3>
     let top = run(s, "component.create", json!({"name": name, "parent": 0, "grounded": false}))?;
     let (comp, occ) = (id_of(&top, "component"), id_of(&top, "occurrence"));
     for (i, pole) in poles.iter().enumerate() {
-        make_pole(s, comp, kind, &format!("{} {} {}", pole.role, i + 1, name), pole)?;
+        make_pole(s, comp, kind, &format!("{} {} {}", pole.role, i + 1, name), pole, true)?;
     }
     if let Some(a) = at {
         run(s, "occurrence.move", json!({"occurrence": occ, "matrix": [1.0, 0.0, 0.0, a[0], 0.0, 1.0, 0.0, a[1], 0.0, 0.0, 1.0, a[2]], "capture": true, "move_grounded": true}))?;
@@ -763,7 +860,7 @@ fn piece_traverse(s: &mut Session, p: &Value) -> Result<Value> {
     let name = str_(p, "name").map(str::trim).filter(|n| !n.is_empty()).unwrap_or("Traverse");
     let name = free_name(s, name);
     let active = s.active_component;
-    let (comp, _) = make_pole(s, 0, "TRAVERSE", &name, &pole)?;
+    let (comp, _) = make_pole(s, 0, "TRAVERSE", &name, &pole, true)?;
     run(s, "component.activate", json!({"component": active}))?;
     Ok(json!({"component": comp, "name": name}))
 }

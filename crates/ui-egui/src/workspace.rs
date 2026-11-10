@@ -136,7 +136,7 @@ pub const SECTIONS: &[Section] = &[
         promoted: 5,
         ids: &["scout.assemblage.tenon", "scout.assemblage.mibois", "scout.assemblage.aronde", "scout.assemblage.cheville", "scout.assemblage.brelage"],
     },
-    Section { tab: "OPÉRATIONS", panel: "MONTAGE", promoted: 1, ids: &["timeline.play"] },
+    Section { tab: "OPÉRATIONS", panel: "MONTAGE", promoted: 2, ids: &["timeline.play", "scout.meuble.detail"] },
     Section {
         tab: "CRÉER",
         panel: "PROFILÉS MÉTAL",

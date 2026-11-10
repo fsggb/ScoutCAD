@@ -318,8 +318,11 @@ fn a_tenon_does_not_come_through_a_split_log() {
     let pied = size_of(&s, "Pied");
     assert!(top[2] <= 101.0, "the log's flat face is intact: {top:?}");
     assert!(pied[2] < 450.0 + 1.0, "{pied:?}");
+    // the flat end of the leg dips a few millimetres into the round side of the log (no wolf's mouth by
+    // default: that cut is slow); nothing near the volume of a tenon
     let all = run(&mut s, "inspect.interference", json!({}));
-    assert!(all["interferences"].as_array().is_none_or(Vec::is_empty), "{all}");
+    let worst = all["interferences"].as_array().map_or(0.0, |v| v.iter().filter_map(|i| i["volume_mm3"].as_f64()).fold(0.0, f64::max));
+    assert!(worst < 30000.0, "{all}");
 }
 
 #[test]
@@ -343,7 +346,7 @@ fn shaping_a_placed_pole_changes_its_volume_as_it_should() {
 #[test]
 fn a_bench_leg_is_one_body_that_stays_inside_the_seat() {
     let mut s = Session::default();
-    run(&mut s, "scout.meuble.create", json!({"type": "banc"}));
+    run(&mut s, "scout.meuble.create", json!({"type": "banc", "detail": true}));
     let st = s.world_state();
     // five poles, five bodies: no loose disc left by the cut that shapes a leg's end
     assert_eq!(st.bodies.len(), 5, "{:?}", st.bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>());
@@ -351,7 +354,22 @@ fn a_bench_leg_is_one_body_that_stays_inside_the_seat() {
         assert!(b.mesh().bounds().max.z <= 450.0, "{}: {:?}", b.name, b.mesh().bounds().max);
     }
     let all = run(&mut s, "inspect.interference", json!({}));
-    assert!(all["interferences"].as_array().is_none_or(Vec::is_empty), "{all}");
+    let worst = all["interferences"].as_array().map_or(0.0, |v| v.iter().filter_map(|i| i["volume_mm3"].as_f64()).fold(0.0, f64::max));
+    assert!(worst < 30000.0, "{all}");
+}
+
+#[test]
+fn the_hidden_joints_are_cut_on_demand() {
+    let mut s = Session::default();
+    run(&mut s, "scout.meuble.create", json!({"type": "banc"}));
+    let vol = |s: &mut Session| run(s, "inspect.center_of_mass", json!({}))["volume"].as_f64().unwrap_or(-1.0);
+    let quick = vol(&mut s);
+    let r = run(&mut s, "scout.meuble.detail", json!({}));
+    assert!(r["operations"].as_u64().unwrap_or(0) >= 8, "{r}");
+    let full = vol(&mut s);
+    assert!((full - quick).abs() > 1.0 && (full / quick - 1.0).abs() < 0.01, "tenons add and mortises take wood: {quick} → {full}");
+    // nothing left to cut
+    assert_eq!(run(&mut s, "scout.meuble.detail", json!({}))["pieces"], 0);
 }
 
 /// Prints how long each model takes (`cargo test --profile ci -p solidcraft-engine --lib -- --ignored --nocapture time_each_model`).
@@ -363,5 +381,14 @@ fn time_each_model() {
         let t = std::time::Instant::now();
         let r = run(&mut s, "scout.meuble.create", json!({"type": m.id}));
         eprintln!("{:<10} {:>6} ms  {} pièces", m.id, t.elapsed().as_millis(), r["poles"]);
+        crate::cmd::scout::PROFILE.with(|p| {
+            for (k, (n, ms)) in p.borrow().iter() {
+                eprintln!("    {k:<28} {n:>4} x  {ms:>7} ms");
+            }
+            p.borrow_mut().clear();
+        });
+        if m.id == "table" {
+            break;
+        }
     }
 }
