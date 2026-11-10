@@ -54,6 +54,8 @@ pub enum Which {
     Traverse,
     Equerre,
     Plateau,
+    Modifier,
+    MeubleModif,
     Coin,
     Profil,
 }
@@ -76,6 +78,8 @@ pub struct Sc {
     /// Assemblage: the pieces swap their roles; mi-bois: add a peg.
     pub invert: bool,
     pub chev: bool,
+    /// Meuble: cut the hidden joints now (slow). Assemblage: wolf's-mouth ends (slow).
+    pub detail: bool,
     pub pc: String,
     pub d: String,
     pub turns: String,
@@ -94,6 +98,7 @@ impl Sc {
             Which::Traverse => ("80".into(), "1500".into(), String::new()),
             Which::Equerre => ("300".into(), "50".into(), String::new()),
             Which::Plateau => ("1000".into(), "600".into(), "20".into()),
+            Which::Modifier => (String::new(), String::new(), String::new()),
             Which::Profil => ("40".into(), "3".into(), "1000".into()),
             _ => (String::new(), String::new(), String::new()),
         };
@@ -103,12 +108,13 @@ impl Sc {
             filled_for: None,
             name: String::new(),
             vals: Vec::new(),
-            x: "0".into(),
-            y: "0".into(),
+            x: if which == Which::Modifier { String::new() } else { "0".into() },
+            y: if which == Which::Modifier { String::new() } else { "0".into() },
             rotation: 0,
             through: false,
             invert: false,
             chev: false,
+            detail: false,
             pc: if which == Which::Plateau { "0".into() } else { "50".into() },
             d: if which == Which::Plateau { "30".into() } else { String::new() },
             turns: "6".into(),
@@ -124,7 +130,7 @@ impl Sc {
     }
 
     fn refill(&mut self) {
-        if self.which != Which::Meuble {
+        if !matches!(self.which, Which::Meuble | Which::MeubleModif) {
             return;
         }
         if let Some(m) = MODELS.get(self.kind) {
@@ -143,6 +149,22 @@ pub fn start(_app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "scout.piece.traverse" => (Sc::new(Which::Traverse, 0), Vec::new()),
         "scout.piece.equerre" => (Sc::new(Which::Equerre, 0), Vec::new()),
         "scout.plateau" => (Sc::new(Which::Plateau, 0), Vec::new()),
+        "scout.piece.modifier" => (Sc::new(Which::Modifier, 0), vec![SelInput::new("Pièce à modifier", BODIES, false)]),
+        "scout.meuble.modifier" => {
+            // the last furniture made, with the settings it was made with
+            let c = _app.session.doc.components.iter().rev().find(|c| c.properties.contains_key("scout_meuble"))?;
+            let kind = MODELS.iter().position(|m| Some(m.id) == c.properties.get("scout_meuble").map(String::as_str))?;
+            let mut sc = Sc::new(Which::MeubleModif, kind);
+            sc.refill();
+            let have: serde_json::Map<String, Value> = c.properties.get("scout_reglages").and_then(|t| serde_json::from_str(t).ok()).unwrap_or_default();
+            for (d, v) in MODELS[kind].params.iter().zip(sc.vals.iter_mut()) {
+                if let Some(x) = have.get(d.key).and_then(Value::as_f64) {
+                    *v = format!("{x}");
+                }
+            }
+            sc.name = c.name.clone();
+            (sc, Vec::new())
+        }
         "scout.profil.tube_rond" => (Sc::new(Which::Profil, 0), Vec::new()),
         "scout.profil.tube_carre" => (Sc::new(Which::Profil, 1), Vec::new()),
         "scout.profil.corniere" => (Sc::new(Which::Profil, 2), Vec::new()),
@@ -178,6 +200,8 @@ pub fn title(k: &Sc) -> &'static str {
         Which::Traverse => "TRAVERSE",
         Which::Equerre => "ÉQUERRE",
         Which::Plateau => "PLATEAU",
+        Which::Modifier => "MODIFIER UNE PIÈCE",
+        Which::MeubleModif => "MODIFIER LE MEUBLE",
         Which::Coin => "COIN DE PATROUILLE",
         Which::Profil => "PROFILÉ MÉTAL",
     }
@@ -191,6 +215,8 @@ pub fn command_id(k: &Sc) -> &'static str {
         Which::Traverse => "scout.piece.traverse",
         Which::Equerre => "scout.piece.equerre",
         Which::Plateau => "scout.plateau",
+        Which::Modifier => "scout.piece.modifier",
+        Which::MeubleModif => "scout.meuble.modifier",
         Which::Coin => "scout.coin.create",
         Which::Profil => "scout.profil",
     }
@@ -233,6 +259,23 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Sc) -> bool {
             text_row(ui, "Position X (mm)", &mut k.x, "");
             text_row(ui, "Position Y (mm)", &mut k.y, "");
             choice_row(ui, "Rotation", "sc_rot", &mut k.rotation, &ROTATIONS);
+            crate::dialogs::form_row(ui, "Tailler tous les assemblages (plus lent)", |ui| check(ui, &mut k.detail));
+        }
+        Which::MeubleModif => {
+            ui.label(egui::RichText::new(format!("Modifier « {} » : le meuble est refait à la même place, et les assemblages que vous y avez ajoutés sont refaits.", k.name)).weak());
+            if let Some(m) = MODELS.get(k.kind) {
+                for (d, v) in m.params.iter().zip(k.vals.iter_mut()) {
+                    setting_row(ui, d, v);
+                }
+            }
+        }
+        Which::Modifier => {
+            ui.label(egui::RichText::new("Laissez vide ce qui ne change pas. Les assemblages qui dépendent de cette pièce sont refaits.").weak());
+            text_row(ui, "Nouveau diamètre (mm)", &mut k.a, "");
+            text_row(ui, "Nouvelle longueur (mm)", &mut k.b, "");
+            text_row(ui, "Déplacer en X (mm)", &mut k.x, "");
+            text_row(ui, "Déplacer en Y (mm)", &mut k.y, "");
+            text_row(ui, "Déplacer en Z (mm)", &mut k.c, "");
         }
         Which::Assemblage => {
             ui.label(egui::RichText::new("Type d’assemblage").strong());
@@ -265,6 +308,7 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Sc) -> bool {
                 _ => {
                     text_row(ui, "Diamètre ou épaisseur du tenon (mm)", &mut k.d, "automatique");
                     crate::dialogs::form_row(ui, "Mortaise débouchante", |ui| check(ui, &mut k.through));
+                    crate::dialogs::form_row(ui, "Bout en gueule de loup (plus lent)", |ui| check(ui, &mut k.detail));
                 }
             }
             if !matches!(kind, "mibois" | "cheville" | "brelage") {
@@ -346,6 +390,24 @@ pub fn commands(k: &Sc, inputs: &[SelInput]) -> Result<Vec<(String, Value)>, Str
             if !k.name.trim().is_empty() {
                 p["name"] = json!(k.name.trim());
             }
+            p["detail"] = json!(k.detail);
+            p
+        }
+        Which::MeubleModif => {
+            let m = MODELS.get(k.kind).ok_or("choisissez un meuble")?;
+            let mut p = json!({"meuble": k.name});
+            for (d, v) in m.params.iter().zip(&k.vals) {
+                p[d.key] = json!(number(d.label, v)?);
+            }
+            p
+        }
+        Which::Modifier => {
+            let mut p = json!({"piece": body_name(inputs, 0)?});
+            for (key, label, text) in [("diameter", "Diamètre", &k.a), ("length", "Longueur", &k.b), ("dx", "X", &k.x), ("dy", "Y", &k.y), ("dz", "Z", &k.c)] {
+                if !text.trim().is_empty() {
+                    p[key] = json!(number(label, text)?);
+                }
+            }
             p
         }
         Which::Assemblage => {
@@ -364,7 +426,10 @@ pub fn commands(k: &Sc, inputs: &[SelInput]) -> Result<Vec<(String, Value)>, Str
                 }
                 "brelage" => p["turns"] = json!(number("Tours", &k.turns)?),
                 "cheville" => {}
-                _ => p["through"] = json!(k.through),
+                _ => {
+                    p["through"] = json!(k.through);
+                    p["gueule"] = json!(k.detail);
+                }
             }
             p
         }

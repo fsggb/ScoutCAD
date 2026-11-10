@@ -31,6 +31,10 @@ const P_KIND: &str = "scout_meuble";
 const P_PARAMS: &str = "scout_reglages";
 const P_PLACE: &str = "scout_place";
 const P_COIN: &str = "scout_coin";
+/// The pole as it was before the first joint or shaping made on it (the point a rebuild restarts from).
+const P_BASE: &str = "scout_base";
+/// The design's own key: the joints and shapings made, in order, so a changed pole can have them redone.
+const K_RECIPES: &str = "fr.soleadworks.recettes";
 /// On a pole built without its hidden joints (the quick way): how many of its first operations are
 /// still to be cut (see `detail`).
 const P_FAST: &str = "scout_rapide";
@@ -81,6 +85,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SCOUT", "MEUBLES")
         .icon("scout_tenon")
         .params("meuble?: name or id (default: all); cuts the tenons, mortises and peg holes left out of the furniture built the quick way (slow: seconds per joint)"),
+    CommandSpec::new("scout.meuble.modifier", "Modifier le meuble", |s, p| atomic(s, |c| meuble_modifier(c, p)))
+        .at("SCOUT", "MEUBLES")
+        .icon("scout_equerre")
+        .params("meuble?: name or id; any setting of its model (see scout.meuble.types), alone or under params → builds it again in place and redoes the joints made on its pieces since (one undo step)"),
+    CommandSpec::new("scout.piece.modifier", "Modifier une pièce", |s, p| atomic(s, |c| modifier(c, p)))
+        .at("SCOUT", "PIÈCES")
+        .icon("scout_traverse")
+        .params("piece: name or id; diameter?, length?: mm; dx?, dy?, dz?: move in mm → rebuilds the piece and every joint that depends on it (one undo step)"),
     CommandSpec::new("scout.plateau", "Plateau", |s, p| atomic(s, |c| piece_plateau(c, p)))
         .at("SCOUT", "PIÈCES")
         .icon("scout_claies")
@@ -705,6 +717,207 @@ fn add_pole(s: &mut Session, beside: u64, pole: &Pole) -> Result<String> {
     Ok(name)
 }
 
+/// The recipes of the design, in the order they were made.
+fn recipes(s: &Session) -> Vec<Value> {
+    s.doc.metadata.get(K_RECIPES).and_then(|v| v.get("recettes")).and_then(Value::as_array).cloned().unwrap_or_default()
+}
+
+fn set_recipes(s: &mut Session, list: &[Value]) -> Result<()> {
+    run(s, "document.metadata.set", json!({"key": K_RECIPES, "value": {"recettes": list}}))?;
+    Ok(())
+}
+
+/// Remembers a joint or a shaping just made (`cmd`, its parameters with the pieces by name, the
+/// poles it created) and the base of each pole it touched, unless it is itself a replay.
+fn record_recipe(s: &mut Session, cmd: &str, p: &Value, touched: &[(&str, u64, &Pole)], created: &[String]) -> Result<()> {
+    let mut q = p.clone();
+    let mut pieces = Vec::new();
+    for (key, id, old) in touched {
+        let name = name_of(s, *id);
+        q[*key] = json!(name);
+        pieces.push(name);
+        let has_base = s.doc.components.iter().any(|c| c.id == *id && c.properties.contains_key(P_BASE));
+        if !has_base {
+            let base = serde_json::to_string(old).map_err(|x| e(x.to_string()))?;
+            run(s, "component.metadata.set", json!({"component": *id, "properties": {P_BASE: base}}))?;
+        }
+    }
+    if p.get("_replay").is_some() {
+        return Ok(());
+    }
+    let mut list = recipes(s);
+    if list.len() >= 500 {
+        return Err(e("plus de 500 assemblages : fusionnez ou simplifiez avant d'en ajouter".into()));
+    }
+    list.push(json!({"c": cmd, "p": q, "pieces": pieces, "created": created}));
+    set_recipes(s, &list)
+}
+
+/// Every piece joined to `start` by a recipe, directly or not (and `start`).
+fn cluster(list: &[Value], start: &str) -> Vec<String> {
+    let mut seen = vec![start.to_string()];
+    loop {
+        let before = seen.len();
+        for r in list {
+            let names: Vec<String> = r["pieces"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default();
+            if names.iter().any(|n| seen.contains(n)) {
+                for n in names {
+                    if !seen.contains(&n) {
+                        seen.push(n);
+                    }
+                }
+            }
+        }
+        if seen.len() == before {
+            return seen;
+        }
+    }
+}
+
+/// Rebuilds the pieces `names` from their bases (the first of them changed by `edit`) and does their
+/// joints and shapings again: what makes a change to one piece reach every joint that depends on it.
+fn rebuild(s: &mut Session, names: &[String], edit: impl Fn(&str, &mut Pole)) -> Result<(usize, Vec<String>)> {
+    let list = recipes(s);
+    struct Member {
+        name: String,
+        parent: u64,
+        kind: String,
+        base: Pole,
+        quick: bool,
+    }
+    let mut members = Vec::new();
+    for n in names {
+        let c = s.doc.components.iter().find(|c| c.name == *n).ok_or_else(|| e(format!("« {n} » n'existe plus")))?;
+        let rec = c.properties.get(P_BASE).or_else(|| c.properties.get(P_POLE)).ok_or_else(|| e(format!("« {n} » n'est pas une perche de SoLeadWorks")))?;
+        let mut base: Pole = serde_json::from_str(rec).map_err(|x| e(x.to_string()))?;
+        edit(n, &mut base);
+        let kind = c.metadata.get("part_number").and_then(|v| v.as_str()).and_then(|t| t.split('-').next()).unwrap_or("PIECE").to_string();
+        members.push(Member { name: n.clone(), parent: c.parent, kind, base, quick: c.properties.contains_key(P_FAST) });
+    }
+    // the poles those joints made (pegs, lashings) go too: the replay makes them again
+    let touching: Vec<&Value> = list.iter().filter(|r| r["pieces"].as_array().is_some_and(|a| a.iter().any(|v| v.as_str().is_some_and(|x| names.iter().any(|n| n == x))))).collect();
+    let mut gone: Vec<String> = touching.iter().flat_map(|r| r["created"].as_array().cloned().unwrap_or_default()).filter_map(|v| v.as_str().map(str::to_string)).collect();
+    gone.extend(names.iter().cloned());
+    for n in &gone {
+        if let Some(id) = s.doc.components.iter().find(|c| c.name == *n).map(|c| c.id) {
+            run(s, "component.delete", json!({"component": id}))?;
+        }
+    }
+    for m in &members {
+        let (comp, _) = make_pole(s, m.parent, &m.kind, &m.name, &m.base, !m.quick)?;
+        // the base stays what it was, with the change
+        let rec = serde_json::to_string(&m.base).map_err(|x| e(x.to_string()))?;
+        run(s, "component.metadata.set", json!({"component": comp, "properties": {P_BASE: rec}}))?;
+    }
+    let mut failed = Vec::new();
+    let mut fresh = Vec::new();
+    for r in &touching {
+        let mut q = r["p"].clone();
+        q["_replay"] = json!(true);
+        let result = match r["c"].as_str() {
+            Some("assemblage") => assemblage(s, &q),
+            Some("faconner") => faconner(s, &q),
+            _ => continue,
+        };
+        match result {
+            Ok(v) => fresh.push(((*r).clone(), v)),
+            Err(x) => failed.push(format!("{} : {x}", r["p"]["kind"].as_str().unwrap_or("assemblage"))),
+        }
+    }
+    // the recipes keep the new names of what they created
+    let mut all = list.clone();
+    for (old, v) in &fresh {
+        if let Some(slot) = all.iter_mut().find(|r| *r == old) {
+            slot["created"] = v["created"].clone();
+        }
+    }
+    set_recipes(s, &all)?;
+    Ok((members.len(), failed))
+}
+
+/// Changes one pole (its diameter, its length, its place) and redoes every joint that depends on it.
+fn modifier(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "scout.piece.modifier";
+    let (id, pole) = piece(s, p, "piece", cmd)?;
+    let name = name_of(s, id);
+    let d = bounded(cmd, p, "diameter", pole.diameter, 10.0, 600.0)?;
+    let len = bounded(cmd, p, "length", pole.length, 20.0, 6000.0)?;
+    let dx = bounded(cmd, p, "dx", 0.0, -10_000.0, 10_000.0)?;
+    let dy = bounded(cmd, p, "dy", 0.0, -10_000.0, 10_000.0)?;
+    let dz = bounded(cmd, p, "dz", 0.0, -10_000.0, 10_000.0)?;
+    let names = cluster(&recipes(s), &name);
+    let (count, failed) = rebuild(s, &names, |n, b| {
+        if n == name {
+            b.diameter = d;
+            if p.get("length").is_some_and(|v| !v.is_null()) {
+                b.length = len;
+            }
+            b.origin = add(b.origin, [dx, dy, dz]);
+        }
+    })?;
+    Ok(json!({"piece": name, "rebuilt": count, "pieces": names, "failed": failed}))
+}
+
+/// Changes the settings of a furniture (its length, its leg diameter…) and builds it again in the
+/// same place, then redoes the joints and shapings made on its pieces since.
+fn meuble_modifier(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "scout.meuble.modifier";
+    let id = pick(s, p, "meuble", P_KIND, "furniture", cmd)?;
+    let c = s.doc.components.iter().find(|c| c.id == id).ok_or_else(|| bad(cmd, "no such furniture"))?;
+    let (kind, name) = (c.properties.get(P_KIND).cloned().unwrap_or_default(), c.name.clone());
+    let parent = c.parent;
+    let m = models::model(&kind).ok_or_else(|| bad(cmd, format!("unknown furniture `{kind}`")))?;
+    let mut merged: serde_json::Map<String, Value> = c.properties.get(P_PARAMS).and_then(|t| serde_json::from_str(t).ok()).unwrap_or_default();
+    for src in [Some(p), p.get("params")].into_iter().flatten() {
+        if let Some(o) = src.as_object() {
+            for d in m.params {
+                if let Some(x) = o.get(d.key).filter(|x| !x.is_null()) {
+                    merged.insert(d.key.to_string(), x.clone());
+                }
+            }
+        }
+    }
+    let place: Vec<f64> = c.properties.get(P_PLACE).map(|t| t.split('|').filter_map(|x| x.parse().ok()).collect()).unwrap_or_default();
+    let (x, y, rot) = match place.as_slice() {
+        [x, y, r] => (*x, *y, *r),
+        _ => (0.0, 0.0, 0.0),
+    };
+    let coin = s.doc.components.iter().any(|k| k.id == parent && k.properties.contains_key(P_COIN)).then_some(parent);
+    let detail = !s.doc.components.iter().any(|k| k.parent == id && k.properties.contains_key(P_FAST));
+    let old_names: Vec<String> = s.doc.components.iter().filter(|k| k.parent == id).map(|k| k.name.clone()).collect();
+    run(s, "component.delete", json!({"component": id}))?;
+    let mut q = json!({"type": kind, "name": name, "at": [x, y], "rotation": rot, "params": merged, "detail": detail});
+    if let Some(cn) = coin {
+        q["coin"] = json!(cn);
+    }
+    let made = create_meuble(s, &q)?;
+    // what the user joined on its pieces since: done again wherever the pieces still exist
+    let mut failed = Vec::new();
+    let mut redone = 0;
+    for r in recipes(s) {
+        let pieces: Vec<String> = r["pieces"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default();
+        if !pieces.iter().any(|n| old_names.contains(n)) {
+            continue;
+        }
+        if !pieces.iter().all(|n| s.doc.components.iter().any(|c| c.name == *n)) {
+            failed.push(format!("{} : une pièce n'existe plus dans le nouveau meuble", r["p"]["kind"].as_str().unwrap_or("assemblage")));
+            continue;
+        }
+        let mut qq = r["p"].clone();
+        qq["_replay"] = json!(true);
+        let result = match r["c"].as_str() {
+            Some("assemblage") => assemblage(s, &qq),
+            Some("faconner") => faconner(s, &qq),
+            _ => continue,
+        };
+        match result {
+            Ok(_) => redone += 1,
+            Err(x) => failed.push(format!("{} : {x}", r["p"]["kind"].as_str().unwrap_or("assemblage"))),
+        }
+    }
+    Ok(json!({"meuble": made["component"], "name": name, "poles": made["poles"], "redone": redone, "failed": failed}))
+}
+
 fn style_of(kind: &str) -> Option<(Style, bool)> {
     Some(match kind {
         "hache" => (Style::Hache, false),
@@ -770,6 +983,7 @@ fn assemblage(s: &mut Session, p: &Value) -> Result<Value> {
     for extra in build.poles.iter().skip(2) {
         created.push(add_pole(s, ia, extra)?);
     }
+    record_recipe(s, "assemblage", p, &[("a", ia, &oa), ("b", ib, &ob)], &created)?;
     Ok(json!({"kind": kind, "a": name_of(s, ia), "b": name_of(s, ib), "changed": changed, "created": created}))
 }
 
@@ -807,6 +1021,7 @@ fn faconner(s: &mut Session, p: &Value) -> Result<Value> {
     }
     .map_err(|m| bad(cmd, m))?;
     let changed = update_pole(s, id, &old, &new)?;
+    record_recipe(s, "faconner", p, &[("piece", id, &old)], &[])?;
     Ok(json!({"kind": kind, "piece": name_of(s, id), "changed": changed, "length": new.length}))
 }
 

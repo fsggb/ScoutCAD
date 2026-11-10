@@ -392,3 +392,32 @@ fn time_each_model() {
         }
     }
 }
+
+#[test]
+fn changing_a_pole_redoes_the_joints_that_depend_on_it() {
+    let mut s = Session::default();
+    pied_and_traverse(&mut s);
+    run(&mut s, "scout.assemblage.tenon", json!({"a": "Traverse", "b": "Pied"}));
+    let before = size_of(&s, "Traverse");
+    let r = run(&mut s, "scout.piece.modifier", json!({"piece": "Pied", "dx": 60}));
+    assert!(r["failed"].as_array().is_none_or(Vec::is_empty), "{r}");
+    assert_eq!(r["rebuilt"], 2, "{r}");
+    let after = size_of(&s, "Traverse");
+    // the traverse was trimmed to the moved pied: it is shorter by what the pied moved towards it (or longer)
+    assert!((after[0] - before[0]).abs() > 50.0, "{before:?} → {after:?}");
+    // undo brings everything back in one step
+    s.execute("edit.undo", &json!({})).ok();
+    let back = size_of(&s, "Traverse");
+    assert!((back[0] - before[0]).abs() < 1.0, "{before:?} → {back:?}");
+}
+
+#[test]
+fn changing_a_furniture_setting_builds_it_again_in_place() {
+    let mut s = Session::default();
+    run(&mut s, "scout.meuble.create", json!({"type": "banc", "name": "Banc A", "at": [500, 300]}));
+    let r = run(&mut s, "scout.meuble.modifier", json!({"meuble": "Banc A", "L": 1600}));
+    assert_eq!(r["name"], "Banc A", "{r}");
+    let plan = run(&mut s, "scout.atelier.dessin", json!({"meuble": "Banc A"}));
+    assert!((plan["dimensions"]["length"].as_f64().unwrap_or(0.0) - 1600.0).abs() < 130.0, "{}", plan["dimensions"]);
+    assert!(s.execute("scout.meuble.modifier", &json!({"meuble": "Banc A", "L": -5})).is_err());
+}
